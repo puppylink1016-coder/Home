@@ -693,10 +693,10 @@ function showResult() {
   questions.forEach((q, i) => {
     const raw = answers[i];
     if (q.axis === 'ds') {
-      dsScore += (q.dir === 's') ? raw : (8 - raw);
+      dsScore += (q.dir === 's') ? (8 - raw) : raw;
       dsCount++;
     } else {
-      ocScore += (q.dir === 'c') ? raw : (8 - raw);
+      ocScore += (q.dir === 'c') ? (8 - raw) : raw;
       ocCount++;
     }
   });
