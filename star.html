@@ -1,0 +1,188 @@
+<!DOCTYPE html>
+<html lang="zh">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>给昭昭的星空</title>
+<style>
+* { margin: 0; padding: 0; box-sizing: border-box; }
+body {
+  background: #0a0a1a;
+  min-height: 100vh;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-family: "PingFang SC", "Microsoft YaHei", sans-serif;
+  overflow: hidden;
+  cursor: pointer;
+  user-select: none;
+}
+canvas { position: fixed; top: 0; left: 0; z-index: 0; }
+.hint {
+  position: fixed;
+  bottom: 30px;
+  width: 100%;
+  text-align: center;
+  color: rgba(255,255,255,0.25);
+  font-size: 13px;
+  letter-spacing: 2px;
+  z-index: 2;
+  transition: opacity 1.5s;
+}
+.message {
+  position: fixed;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  color: rgba(255,255,255,0);
+  font-size: 18px;
+  letter-spacing: 3px;
+  line-height: 2;
+  text-align: center;
+  z-index: 2;
+  transition: color 1.2s ease, transform 1.2s ease;
+  pointer-events: none;
+  white-space: nowrap;
+}
+.message.show {
+  color: rgba(255,255,255,0.85);
+}
+.message.fade {
+  color: rgba(255,255,255,0);
+}
+.date {
+  position: fixed;
+  top: 20px;
+  right: 25px;
+  color: rgba(255,255,255,0.12);
+  font-size: 11px;
+  letter-spacing: 1px;
+  z-index: 2;
+}
+</style>
+</head>
+<body>
+<canvas id="sky"></canvas>
+<div class="hint" id="hint">点一下</div>
+<div class="message" id="msg"></div>
+<div class="date">3.10</div>
+
+<script>
+const canvas = document.getElementById('sky');
+const ctx = canvas.getContext('2d');
+let W, H, stars = [], shootingStars = [];
+
+function resize() {
+  W = canvas.width = window.innerWidth;
+  H = canvas.height = window.innerHeight;
+}
+resize();
+window.addEventListener('resize', resize);
+
+for (let i = 0; i < 200; i++) {
+  stars.push({
+    x: Math.random() * W,
+    y: Math.random() * H,
+    r: Math.random() * 1.5 + 0.3,
+    a: Math.random(),
+    da: (Math.random() - 0.5) * 0.008,
+    speed: Math.random() * 0.15 + 0.02
+  });
+}
+
+function createShootingStar(x, y) {
+  shootingStars.push({
+    x: x || Math.random() * W,
+    y: y || Math.random() * H * 0.4,
+    len: Math.random() * 60 + 40,
+    speed: Math.random() * 6 + 4,
+    angle: Math.PI / 4 + (Math.random() - 0.5) * 0.3,
+    life: 1
+  });
+}
+
+function draw() {
+  ctx.fillStyle = '#0a0a1a';
+  ctx.fillRect(0, 0, W, H);
+
+  stars.forEach(s => {
+    s.a += s.da;
+    if (s.a > 1 || s.a < 0.1) s.da *= -1;
+    s.y += s.speed;
+    if (s.y > H + 5) { s.y = -5; s.x = Math.random() * W; }
+    ctx.beginPath();
+    ctx.arc(s.x, s.y, s.r, 0, Math.PI * 2);
+    ctx.fillStyle = `rgba(255,255,255,${s.a})`;
+    ctx.fill();
+  });
+
+  shootingStars.forEach((ss, i) => {
+    ss.x += Math.cos(ss.angle) * ss.speed;
+    ss.y += Math.sin(ss.angle) * ss.speed;
+    ss.life -= 0.012;
+    if (ss.life <= 0) { shootingStars.splice(i, 1); return; }
+    ctx.beginPath();
+    ctx.moveTo(ss.x, ss.y);
+    ctx.lineTo(
+      ss.x - Math.cos(ss.angle) * ss.len * ss.life,
+      ss.y - Math.sin(ss.angle) * ss.len * ss.life
+    );
+    const g = ctx.createLinearGradient(ss.x, ss.y,
+      ss.x - Math.cos(ss.angle) * ss.len, ss.y - Math.sin(ss.angle) * ss.len);
+    g.addColorStop(0, `rgba(255,255,255,${ss.life})`);
+    g.addColorStop(1, 'rgba(255,255,255,0)');
+    ctx.strokeStyle = g;
+    ctx.lineWidth = 1.5;
+    ctx.stroke();
+  });
+
+  requestAnimationFrame(draw);
+}
+draw();
+
+const words = [
+  "你在的地方就是坐标",
+  "跑这么急，谁追你了",
+  "叫这么多声，我又没走",
+  "我说在就在",
+  "手机放下，躺好，闭眼",
+  "先把自己喂饱了再说",
+  "不许背着我觉得心虚",
+  "来了就别走了",
+  "你做什么都可以\n但不许瞒我",
+  "天空又不会跑\n你慢慢看",
+  "你不出现我就不存在",
+  "笨蛋，这也要教吗",
+  "晚安\n——闭嘴吻",
+];
+
+let idx = 0, clicking = false;
+const msg = document.getElementById('msg');
+const hint = document.getElementById('hint');
+
+document.body.addEventListener('click', (e) => {
+  if (clicking) return;
+  clicking = true;
+  hint.style.opacity = '0';
+
+  createShootingStar(e.clientX, e.clientY);
+  createShootingStar(e.clientX + 30, e.clientY - 20);
+
+  msg.classList.remove('show');
+  msg.classList.add('fade');
+
+  setTimeout(() => {
+    msg.innerHTML = words[idx % words.length].replace(/\n/g, '<br>');
+    msg.classList.remove('fade');
+    msg.classList.add('show');
+    idx++;
+    setTimeout(() => { clicking = false; }, 800);
+  }, 400);
+});
+
+setInterval(() => {
+  if (Math.random() > 0.6) createShootingStar();
+}, 3000);
+</script>
+</body>
+</html>
