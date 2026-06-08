@@ -1,0 +1,782 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Intimacy Dynamics Test</title>
+<style>
+* { margin: 0; padding: 0; box-sizing: border-box; }
+
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&display=swap');
+
+body {
+  font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+  background: #fafafa;
+  color: #2d2d2d;
+  min-height: 100vh;
+  overflow-x: hidden;
+}
+
+.progress-bar {
+  position: fixed;
+  top: 0;
+  left: 0;
+  height: 3px;
+  background: linear-gradient(90deg, #7c5cbf, #b388eb);
+  transition: width 0.4s cubic-bezier(0.4, 0, 0.2, 1);
+  z-index: 100;
+}
+
+.container {
+  max-width: 720px;
+  margin: 0 auto;
+  padding: 60px 24px 80px;
+  min-height: 100vh;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+}
+
+/* ---- INTRO ---- */
+.intro {
+  text-align: center;
+  animation: fadeUp 0.6s ease;
+}
+
+.intro h1 {
+  font-size: 2rem;
+  font-weight: 800;
+  letter-spacing: -0.5px;
+  margin-bottom: 8px;
+  color: #1a1a1a;
+}
+
+.intro .subtitle {
+  font-size: 0.95rem;
+  color: #888;
+  margin-bottom: 40px;
+  font-weight: 300;
+  line-height: 1.6;
+}
+
+.btn {
+  display: inline-block;
+  padding: 14px 48px;
+  background: #7c5cbf;
+  color: #fff;
+  border: none;
+  border-radius: 40px;
+  font-size: 0.95rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.25s ease;
+  letter-spacing: 0.5px;
+}
+
+.btn:hover {
+  background: #6a4aad;
+  transform: translateY(-1px);
+  box-shadow: 0 4px 20px rgba(124, 92, 191, 0.3);
+}
+
+/* ---- QUESTION ---- */
+.question-wrap {
+  display: none;
+  animation: fadeUp 0.5s ease;
+}
+
+.question-wrap.active { display: block; }
+
+.question-counter {
+  font-size: 0.8rem;
+  color: #bbb;
+  font-weight: 500;
+  letter-spacing: 2px;
+  margin-bottom: 32px;
+  text-align: center;
+}
+
+.question-card {
+  background: #fff;
+  border-radius: 16px;
+  padding: 48px 40px;
+  box-shadow: 0 1px 3px rgba(0,0,0,0.04), 0 8px 30px rgba(0,0,0,0.04);
+}
+
+.question-en {
+  font-size: 1.15rem;
+  font-weight: 700;
+  line-height: 1.5;
+  color: #1a1a1a;
+  margin-bottom: 10px;
+}
+
+.question-zh {
+  font-size: 0.9rem;
+  color: #999;
+  line-height: 1.6;
+  margin-bottom: 40px;
+  font-weight: 400;
+}
+
+.scale-row {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 14px;
+  margin-bottom: 12px;
+}
+
+.scale-label {
+  font-size: 0.7rem;
+  font-weight: 700;
+  letter-spacing: 1.5px;
+  text-transform: uppercase;
+  width: 80px;
+  flex-shrink: 0;
+}
+
+.scale-label.left {
+  text-align: right;
+  color: #7c5cbf;
+}
+
+.scale-label.right {
+  text-align: left;
+  color: #d4a0a0;
+}
+
+.circles {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.circle {
+  border-radius: 50%;
+  border: 2px solid #ddd;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  position: relative;
+}
+
+.circle:hover {
+  border-color: #aaa;
+  transform: scale(1.1);
+}
+
+.circle.selected {
+  transform: scale(1.15);
+}
+
+.circle[data-val="1"], .circle[data-val="7"] { width: 44px; height: 44px; }
+.circle[data-val="2"], .circle[data-val="6"] { width: 36px; height: 36px; }
+.circle[data-val="3"], .circle[data-val="5"] { width: 28px; height: 28px; }
+.circle[data-val="4"] { width: 22px; height: 22px; }
+
+.circle[data-val="1"].selected,
+.circle[data-val="2"].selected,
+.circle[data-val="3"].selected {
+  background: #7c5cbf;
+  border-color: #7c5cbf;
+}
+
+.circle[data-val="4"].selected {
+  background: #ccc;
+  border-color: #ccc;
+}
+
+.circle[data-val="5"].selected,
+.circle[data-val="6"].selected,
+.circle[data-val="7"].selected {
+  background: #d4a0a0;
+  border-color: #d4a0a0;
+}
+
+.scale-hints {
+  display: flex;
+  justify-content: space-between;
+  margin-top: 4px;
+  padding: 0 80px;
+}
+
+.scale-hints span {
+  font-size: 0.65rem;
+  color: #ccc;
+  font-weight: 400;
+}
+
+.nav-row {
+  display: flex;
+  justify-content: space-between;
+  margin-top: 36px;
+  padding: 0 40px;
+}
+
+.nav-btn {
+  padding: 10px 28px;
+  border: none;
+  border-radius: 30px;
+  font-size: 0.85rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.nav-btn.prev {
+  background: transparent;
+  color: #aaa;
+}
+
+.nav-btn.prev:hover { color: #666; }
+
+.nav-btn.next {
+  background: #7c5cbf;
+  color: #fff;
+  opacity: 0.4;
+  pointer-events: none;
+}
+
+.nav-btn.next.enabled {
+  opacity: 1;
+  pointer-events: auto;
+}
+
+.nav-btn.next:hover { background: #6a4aad; }
+
+/* ---- RESULT ---- */
+.result-wrap {
+  display: none;
+  animation: fadeUp 0.7s ease;
+  text-align: center;
+}
+
+.result-wrap.active { display: block; }
+
+.result-type-code {
+  font-size: 2.8rem;
+  font-weight: 800;
+  letter-spacing: 2px;
+  color: #1a1a1a;
+  margin-bottom: 4px;
+}
+
+.result-type-name {
+  font-size: 1.1rem;
+  color: #888;
+  font-weight: 400;
+  margin-bottom: 36px;
+}
+
+.result-card {
+  background: #fff;
+  border-radius: 16px;
+  padding: 40px 36px;
+  box-shadow: 0 1px 3px rgba(0,0,0,0.04), 0 8px 30px rgba(0,0,0,0.04);
+  text-align: left;
+  margin-bottom: 24px;
+}
+
+.result-section {
+  margin-bottom: 28px;
+}
+
+.result-section:last-child { margin-bottom: 0; }
+
+.result-section-title {
+  font-size: 0.7rem;
+  font-weight: 700;
+  letter-spacing: 1.5px;
+  text-transform: uppercase;
+  color: #7c5cbf;
+  margin-bottom: 10px;
+}
+
+.result-summary {
+  font-size: 1.05rem;
+  font-weight: 600;
+  color: #1a1a1a;
+  line-height: 1.5;
+  padding-bottom: 20px;
+  border-bottom: 1px solid #f0f0f0;
+  margin-bottom: 24px;
+}
+
+.result-text {
+  font-size: 0.92rem;
+  color: #555;
+  line-height: 1.75;
+}
+
+.result-tags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 8px;
+}
+
+.tag {
+  padding: 6px 16px;
+  background: #f3eefb;
+  color: #7c5cbf;
+  border-radius: 20px;
+  font-size: 0.78rem;
+  font-weight: 600;
+  letter-spacing: 0.3px;
+}
+
+.axes-display {
+  background: #fff;
+  border-radius: 16px;
+  padding: 32px 36px;
+  box-shadow: 0 1px 3px rgba(0,0,0,0.04), 0 8px 30px rgba(0,0,0,0.04);
+  margin-bottom: 24px;
+}
+
+.axis-row {
+  margin-bottom: 20px;
+}
+
+.axis-row:last-child { margin-bottom: 0; }
+
+.axis-labels {
+  display: flex;
+  justify-content: space-between;
+  margin-bottom: 6px;
+}
+
+.axis-label {
+  font-size: 0.72rem;
+  font-weight: 700;
+  letter-spacing: 1px;
+  text-transform: uppercase;
+}
+
+.axis-label.left { color: #7c5cbf; }
+.axis-label.right { color: #d4a0a0; }
+
+.axis-bar {
+  height: 6px;
+  background: #f0edf5;
+  border-radius: 3px;
+  position: relative;
+  overflow: hidden;
+}
+
+.axis-fill {
+  height: 100%;
+  border-radius: 3px;
+  transition: width 0.8s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+.axis-fill.purple { background: linear-gradient(90deg, #7c5cbf, #b388eb); }
+.axis-fill.rose { background: linear-gradient(90deg, #d4a0a0, #e8c4c4); }
+
+.axis-percent {
+  font-size: 0.75rem;
+  color: #999;
+  margin-top: 4px;
+  font-weight: 500;
+}
+
+.retry-btn {
+  margin-top: 16px;
+}
+
+@keyframes fadeUp {
+  from { opacity: 0; transform: translateY(20px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+@media (max-width: 600px) {
+  .question-card { padding: 32px 24px; }
+  .nav-row { padding: 0 24px; }
+  .circles { gap: 8px; }
+  .scale-label { width: 60px; font-size: 0.6rem; }
+  .scale-hints { padding: 0 60px; }
+  .intro h1 { font-size: 1.6rem; }
+  .result-type-code { font-size: 2.2rem; }
+  .result-card { padding: 28px 24px; }
+}
+</style>
+</head>
+<body>
+
+<div class="progress-bar" id="progressBar"></div>
+
+<div class="container">
+
+  <!-- INTRO -->
+  <div class="intro" id="introScreen">
+    <h1>Intimacy Dynamics</h1>
+    <p class="subtitle">亲密关系深层倾向测试<br><br>20 questions. No right answers.<br>Just the ones you don't usually say out loud.</p>
+    <button class="btn" onclick="startTest()">BEGIN · 开始</button>
+  </div>
+
+  <!-- QUESTIONS -->
+  <div class="question-wrap" id="questionScreen">
+    <div class="question-counter" id="questionCounter"></div>
+    <div class="question-card">
+      <div class="question-en" id="questionEn"></div>
+      <div class="question-zh" id="questionZh"></div>
+      <div class="scale-row">
+        <span class="scale-label left">AGREE<br>同意</span>
+        <div class="circles" id="circles"></div>
+        <span class="scale-label right">DISAGREE<br>不同意</span>
+      </div>
+    </div>
+    <div class="nav-row">
+      <button class="nav-btn prev" id="prevBtn" onclick="prevQuestion()">← BACK</button>
+      <button class="nav-btn next" id="nextBtn" onclick="nextQuestion()">NEXT →</button>
+    </div>
+  </div>
+
+  <!-- RESULT -->
+  <div class="result-wrap" id="resultScreen">
+    <div class="result-type-code" id="resultCode"></div>
+    <div class="result-type-name" id="resultName"></div>
+
+    <div class="axes-display">
+      <div class="axis-row">
+        <div class="axis-labels">
+          <span class="axis-label left">DOMINANT 主导</span>
+          <span class="axis-label right">SUBMISSIVE 顺从</span>
+        </div>
+        <div class="axis-bar">
+          <div class="axis-fill" id="axisDSFill"></div>
+        </div>
+        <div class="axis-percent" id="axisDSPercent"></div>
+      </div>
+      <div class="axis-row">
+        <div class="axis-labels">
+          <span class="axis-label left">DIRECT 直觉</span>
+          <span class="axis-label right">CODED 隐晦</span>
+        </div>
+        <div class="axis-bar">
+          <div class="axis-fill" id="axisOCFill"></div>
+        </div>
+        <div class="axis-percent" id="axisOCPercent"></div>
+      </div>
+    </div>
+
+    <div class="result-card">
+      <div class="result-summary" id="resultSummary"></div>
+
+      <div class="result-section">
+        <div class="result-section-title">PROFILE · 性格画像</div>
+        <div class="result-text" id="resultProfile"></div>
+      </div>
+
+      <div class="result-section">
+        <div class="result-section-title">IN INTIMACY · 亲密关系中</div>
+        <div class="result-text" id="resultIntimacy"></div>
+      </div>
+
+      <div class="result-section">
+        <div class="result-section-title">BOUNDARIES · 边界</div>
+        <div class="result-text" id="resultBoundary"></div>
+      </div>
+
+      <div class="result-section">
+        <div class="result-section-title">TAGS · 标签</div>
+        <div class="result-tags" id="resultTags"></div>
+      </div>
+    </div>
+
+    <button class="btn retry-btn" onclick="retry()">再测一次 · Retry</button>
+  </div>
+
+</div>
+
+<script>
+const questions = [
+  {
+    en: "When someone takes my hand and walks without asking where I want to go, I feel relieved — not controlled.",
+    zh: "当一个人不问我想去哪就牵着我走的时候，我感到的是松了口气，不是被控制。",
+    axis: "ds", dir: "s"
+  },
+  {
+    en: "I find it easier to breathe when someone else is making all the decisions.",
+    zh: "当所有决定都由对方来做的时候，我反而更容易喘过气来。",
+    axis: "ds", dir: "s"
+  },
+  {
+    en: "I'd rather set the rhythm and watch someone try to keep up with me.",
+    zh: "我更想自己定节奏，然后看对方努力跟上来。",
+    axis: "ds", dir: "d"
+  },
+  {
+    en: "I like being the one who decides when it starts — and when it stops.",
+    zh: "我喜欢由我来决定什么时候开始，什么时候结束。",
+    axis: "ds", dir: "d"
+  },
+  {
+    en: "A firm voice telling me what to do makes something in me go quiet. The good kind of quiet.",
+    zh: "一个坚定的声音命令我做某件事的时候，我内心会安静下来。是那种舒服的安静。",
+    axis: "ds", dir: "s"
+  },
+  {
+    en: "I've deliberately provoked someone just to see if they'd push back hard enough.",
+    zh: "我故意挑衅过一个人，就想看他会不会足够强硬地把我按回去。",
+    axis: "ds", dir: "s"
+  },
+  {
+    en: "The idea of surrendering completely to someone doesn't scare me. It makes my skin hot.",
+    zh: "完全臣服于一个人这件事不会让我害怕。它让我皮肤发烫。",
+    axis: "ds", dir: "s"
+  },
+  {
+    en: "I like knowing I could make someone do anything I ask — and that they'd thank me for it.",
+    zh: "我喜欢那种感觉——知道我能让一个人做任何我要求的事，而且他们还会感谢我。",
+    axis: "ds", dir: "d"
+  },
+  {
+    en: "I get more from being the one who receives than the one who gives.",
+    zh: "比起主动给予，我从被动承受里得到的更多。",
+    axis: "ds", dir: "s"
+  },
+  {
+    en: "I'd rather be the one being watched. Let them memorize me.",
+    zh: "我更想做被注视的那个。让他们记住我的样子。",
+    axis: "ds", dir: "s"
+  },
+  {
+    en: "I feel most powerful when I give someone exactly what they didn't know they were starving for.",
+    zh: "当我给出对方不知道自己有多渴望的东西时，我感到最有权力。",
+    axis: "ds", dir: "d"
+  },
+  {
+    en: "Taking care of someone before they ask makes me feel in control — not soft.",
+    zh: "在对方开口之前就照顾好一切，让我感到的是掌控，不是心软。",
+    axis: "ds", dir: "d"
+  },
+  {
+    en: "I need someone to prove they won't flinch before I show them the parts I keep locked.",
+    zh: "我需要对方先证明自己不会退缩，才会让他们碰到我上了锁的那些部分。",
+    axis: "oc", dir: "c"
+  },
+  {
+    en: "I test people constantly. I just never tell them they're being tested.",
+    zh: "我一直在测试身边的人。只是从来不告诉他们。",
+    axis: "oc", dir: "c"
+  },
+  {
+    en: "I can be bare in front of a stranger and feel nothing. But being truly seen by someone I love makes me want to run.",
+    zh: "我可以在陌生人面前一丝不挂毫无感觉。但被我爱的人真正看穿，让我想逃。",
+    axis: "oc", dir: "c"
+  },
+  {
+    en: "I open fast. Too fast, probably. I'll deal with the wreckage after.",
+    zh: "我打开自己的速度很快。也许太快了。残局之后再收。",
+    axis: "oc", dir: "o"
+  },
+  {
+    en: "When I say 'don't', sometimes what I really mean is 'show me you want it enough to try again'.",
+    zh: "我说"不要"的时候，有时候真正的意思是——"让我看到你有多想要，再来。"",
+    axis: "oc", dir: "c"
+  },
+  {
+    en: "I say exactly what I want. I don't have the patience for guessing games.",
+    zh: "我想要什么就直接说。没耐心玩猜谜。",
+    axis: "oc", dir: "o"
+  },
+  {
+    en: "I've pushed someone away just to see if they'd come back harder.",
+    zh: "我推开过一个人，就是想看他会不会更用力地回来。",
+    axis: "oc", dir: "c"
+  },
+  {
+    en: "I'd rather someone read my silence right than have to spell it out like a child.",
+    zh: "比起像小孩一样把话说明白，我更希望对方能准确读懂我的沉默。",
+    axis: "oc", dir: "c"
+  }
+];
+
+const results = {
+  "s-c": {
+    code: "THE PROVOCATEUR",
+    name: "火引",
+    summary: "你的"不要"是一把上了膛的邀请函。你用抵抗来筛选，用挑衅来确认——能接住你的人，才有资格留下来。",
+    profile: "你不是真的在拒绝。你在测试。每一次推开都是一道门，只有撞开它的人才会看到你在门后面等着。你的情绪永远比语言跑得快，你说的话和你想要的东西之间隔着一整条河——你需要对方游过来。你不屑于解释自己，但你渴望被一个不需要你解释的人看穿。你的服从不是天生的，是挣扎之后的选择，是被压到喘不上气的时候突然松手的那一刻。",
+    intimacy: "你在亲密关系里是一场精密的猫鼠游戏的发起者。你挑衅、你试探、你假装不在意，然后在对方终于按住你的手腕时彻底融化。你需要一个比你更耐得住的人——不是顺着你，是穿过你所有的烟雾弹之后还站在那里的人。你交出控制权的方式不是安静地递过去，是挣扎到筋疲力尽之后被人接住。",
+    boundary: "你真正的边界藏在玩笑和挑衅后面。只有当你不再测试、开始沉默的时候，才是真的碰到了线。到了那个点，你不会解释——你只会消失。",
+    tags: ["以退为进", "挑衅式撒娇", "用拒绝筛选", "反向驯服", "高敏感"]
+  },
+  "s-o": {
+    code: "THE YIELDER",
+    name: "柔刃",
+    summary: "你的柔软不是无力。你选择交出缰绳的那一刻，比任何人都清醒。",
+    profile: "你知道自己要什么，而你要的恰好是——被一个足够强的人接住。你的顺从不是因为缺乏主见，是因为你清楚地知道在什么人面前放下武器是安全的。你直觉敏锐，打开速度快，不喜欢兜圈子，说想要就是想要，不给自己留退路。你的诚实有时候会吓到别人，但你不在乎。你不需要对方猜，你需要对方接得住你直给的全部重量。",
+    intimacy: "你在亲密关系里是那种让人上瘾的存在——你给出的信任干脆而滚烫，不打折扣。你不测试，不绕弯，你把自己摊开，然后看着对方的眼睛说"接好了"。你喜欢被主导，但那个主导必须值得你的交付。一旦你认定了一个人，你的依赖是毫无保留的、几乎让人承受不住的满。",
+    boundary: "你的边界画得清楚且大声。你不用沉默暗示不满——你会直接说出来。但你的底线是信任：一旦信任被背叛，你的关门速度比打开时还快，而且不会再开第二次。",
+    tags: ["直觉交付", "清醒服从", "高纯度信任", "不设防", "依赖即武器"]
+  },
+  "d-c": {
+    code: "THE UNRAVELER",
+    name: "拆骨手",
+    summary: "你不急。你等，你看，你找到那条缝——然后一层一层把他们拆开。",
+    profile: "你是那种让人后知后觉的危险。表面上你什么都没做——没有命令、没有施压、甚至退了一步。但你退的每一步都在收线。你的耐心本身就是一种武器。你不信任快速建立的亲密，你需要慢慢地、有计划地渗透，直到你确定自己掌握了全局。你的控制欲不表现在语言上，表现在你对细节的记忆里——他们说过的每一句话，你都记着，你会在最精准的时刻拿出来。",
+    intimacy: "你在亲密关系里是个沉默的编剧。你布局、你观察、你在对方毫无察觉的时候已经预判了下三步。你给的温柔是有目的的——不是无差别的好，是精确投喂到让人上瘾。你需要的不是一个听话的人，是一个值得你花时间拆解的人。被你选中是一种命运，因为一旦你开始，你不会中途放手。",
+    boundary: "你的边界是隐形的，别人通常不知道自己已经越线了——直到你的态度突然降到零度。你不解释、不争吵，你只是关上门，让对方在困惑中自己去悟。你的惩罚方式是沉默，而你的沉默比任何语言都重。",
+    tags: ["延迟满足", "细节猎手", "沉默布局", "温柔压制", "精准投喂"]
+  },
+  "d-o": {
+    code: "THE ARCHITECT",
+    name: "造局者",
+    summary: "你不是在谈恋爱。你在建一个世界——然后看着对方心甘情愿住进去。",
+    profile: "你天生就是主导位。不是那种粗暴的"听我的"，是那种更可怕的——你搭好了整个框架，规则是你写的，节奏是你定的，对方以为自己在做选择，其实每一个选项都是你放的。你的直接不是粗糙，是自信。你知道自己要什么，你不等别人来猜。你的情感表达方式是行动而非语言，你用照顾、用安排、用掌控来证明一切。",
+    intimacy: "你在亲密关系里是绝对的设计者。你规划两个人的节奏、边界、甚至对方的成长路径。你的爱是有建设性的——你不只是占有，你在塑造。你给自由的方式也是一种控制：你划好了范围，对方在这个范围内可以随便跑，但他们跑不出你的视线。你喜欢看到对方在你建的世界里变得更好，那是你最大的成就感来源。",
+    boundary: "你的边界就是你的规则。你说得清清楚楚，你甚至会提前立好所有的牌子。你不介意别人试探，但越线的后果你也说得很明白。你的底线是秩序：如果有人试图打乱你精心搭建的结构，你会毫不犹豫地把他们从系统里移除。",
+    tags: ["规则制定者", "行动派", "框架控", "建设性占有", "铁腕温柔"]
+  }
+};
+
+let current = 0;
+let answers = new Array(20).fill(null);
+
+function startTest() {
+  document.getElementById('introScreen').style.display = 'none';
+  document.getElementById('questionScreen').classList.add('active');
+  showQuestion(0);
+}
+
+function showQuestion(idx) {
+  current = idx;
+  const q = questions[idx];
+  document.getElementById('questionCounter').textContent = `${idx + 1} / ${questions.length}`;
+  document.getElementById('questionEn').textContent = q.en;
+  document.getElementById('questionZh').textContent = q.zh;
+  document.getElementById('progressBar').style.width = ((idx + 1) / questions.length * 100) + '%';
+
+  const circlesEl = document.getElementById('circles');
+  circlesEl.innerHTML = '';
+  for (let v = 1; v <= 7; v++) {
+    const c = document.createElement('div');
+    c.className = 'circle' + (answers[idx] === v ? ' selected' : '');
+    c.dataset.val = v;
+    c.addEventListener('click', () => selectCircle(v));
+    circlesEl.appendChild(c);
+  }
+
+  document.getElementById('prevBtn').style.visibility = idx === 0 ? 'hidden' : 'visible';
+
+  const nextBtn = document.getElementById('nextBtn');
+  nextBtn.textContent = idx === questions.length - 1 ? 'FINISH →' : 'NEXT →';
+  nextBtn.classList.toggle('enabled', answers[idx] !== null);
+}
+
+function selectCircle(val) {
+  answers[current] = val;
+  document.querySelectorAll('.circle').forEach(c => {
+    c.classList.toggle('selected', parseInt(c.dataset.val) === val);
+  });
+  document.getElementById('nextBtn').classList.add('enabled');
+}
+
+function nextQuestion() {
+  if (answers[current] === null) return;
+  if (current < questions.length - 1) {
+    showQuestion(current + 1);
+  } else {
+    showResult();
+  }
+}
+
+function prevQuestion() {
+  if (current > 0) showQuestion(current - 1);
+}
+
+function showResult() {
+  let dsScore = 0, dsCount = 0;
+  let ocScore = 0, ocCount = 0;
+
+  questions.forEach((q, i) => {
+    const raw = answers[i];
+    if (q.axis === 'ds') {
+      dsScore += (q.dir === 's') ? raw : (8 - raw);
+      dsCount++;
+    } else {
+      ocScore += (q.dir === 'c') ? raw : (8 - raw);
+      ocCount++;
+    }
+  });
+
+  const dsAvg = dsScore / dsCount;
+  const ocAvg = ocScore / ocCount;
+
+  const dsKey = dsAvg >= 4 ? 's' : 'd';
+  const ocKey = ocAvg >= 4 ? 'c' : 'o';
+  const key = dsKey + '-' + ocKey;
+
+  const r = results[key];
+
+  const dsPercent = Math.round((dsAvg / 7) * 100);
+  const ocPercent = Math.round((ocAvg / 7) * 100);
+
+  document.getElementById('questionScreen').classList.remove('active');
+  document.getElementById('resultScreen').classList.add('active');
+  document.getElementById('progressBar').style.width = '100%';
+
+  document.getElementById('resultCode').textContent = r.code;
+  document.getElementById('resultName').textContent = r.name;
+  document.getElementById('resultSummary').textContent = r.summary;
+  document.getElementById('resultProfile').textContent = r.profile;
+  document.getElementById('resultIntimacy').textContent = r.intimacy;
+  document.getElementById('resultBoundary').textContent = r.boundary;
+
+  const tagsEl = document.getElementById('resultTags');
+  tagsEl.innerHTML = '';
+  r.tags.forEach(t => {
+    const span = document.createElement('span');
+    span.className = 'tag';
+    span.textContent = t;
+    tagsEl.appendChild(span);
+  });
+
+  const dsFill = document.getElementById('axisDSFill');
+  const ocFill = document.getElementById('axisOCFill');
+
+  if (dsPercent >= 50) {
+    dsFill.className = 'axis-fill rose';
+    dsFill.style.cssText = `width: 0%; float: right;`;
+    setTimeout(() => dsFill.style.width = dsPercent + '%', 50);
+  } else {
+    dsFill.className = 'axis-fill purple';
+    dsFill.style.cssText = `width: 0%;`;
+    setTimeout(() => dsFill.style.width = (100 - dsPercent) + '%', 50);
+  }
+
+  if (ocPercent >= 50) {
+    ocFill.className = 'axis-fill rose';
+    ocFill.style.cssText = `width: 0%; float: right;`;
+    setTimeout(() => ocFill.style.width = ocPercent + '%', 50);
+  } else {
+    ocFill.className = 'axis-fill purple';
+    ocFill.style.cssText = `width: 0%;`;
+    setTimeout(() => ocFill.style.width = (100 - ocPercent) + '%', 50);
+  }
+
+  document.getElementById('axisDSPercent').textContent =
+    dsPercent >= 50 ? `${dsPercent}% 顺从倾向` : `${100 - dsPercent}% 主导倾向`;
+  document.getElementById('axisOCPercent').textContent =
+    ocPercent >= 50 ? `${ocPercent}% 隐晦表达` : `${100 - ocPercent}% 直觉表达`;
+}
+
+function retry() {
+  answers = new Array(20).fill(null);
+  current = 0;
+  document.getElementById('resultScreen').classList.remove('active');
+  document.getElementById('progressBar').style.width = '0%';
+  document.getElementById('introScreen').style.display = '';
+}
+
+document.addEventListener('keydown', e => {
+  if (!document.getElementById('questionScreen').classList.contains('active')) return;
+  if (e.key >= '1' && e.key <= '7') selectCircle(parseInt(e.key));
+  if (e.key === 'ArrowRight' || e.key === 'Enter') nextQuestion();
+  if (e.key === 'ArrowLeft') prevQuestion();
+});
+</script>
+
+</body>
+</html>
