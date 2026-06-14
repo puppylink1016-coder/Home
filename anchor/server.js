@@ -451,6 +451,55 @@ app.post('/api/compress', async (req, res) => {
   }
 });
 
+// List memories
+app.get('/api/memories', async (req, res) => {
+  try {
+    const { data, error } = await supabase
+      .from('memories')
+      .select('*')
+      .order('created_at', { ascending: true });
+
+    if (error) throw error;
+    res.json(data);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// Add memory manually
+app.post('/api/memories', async (req, res) => {
+  try {
+    const { summary } = req.body;
+    if (!summary) return res.status(400).json({ error: 'summary is required' });
+
+    const { data, error } = await supabase
+      .from('memories')
+      .insert({ summary })
+      .select()
+      .single();
+
+    if (error) throw error;
+    res.json(data);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// Delete memory
+app.delete('/api/memories/:id', async (req, res) => {
+  try {
+    const { error } = await supabase
+      .from('memories')
+      .delete()
+      .eq('id', req.params.id);
+
+    if (error) throw error;
+    res.json({ success: true });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
 app.listen(PORT, () => {
   console.log(`Anchor listening on port ${PORT}`);
 });
