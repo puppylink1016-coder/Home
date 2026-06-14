@@ -2,21 +2,21 @@ import { useState, useEffect } from 'react';
 
 export default function Settings({ settings, onSave, onClose }) {
   const [form, setForm] = useState({
-    systemPrompt: '',
+    system_prompt: '',
     model: '',
     temperature: 0.7,
-    contextTurns: 20,
-    maxTokens: 4096,
+    context_turns: 20,
+    max_tokens: 4096,
   });
 
   useEffect(() => {
     if (settings) {
       setForm({
-        systemPrompt: settings.systemPrompt || '',
+        system_prompt: settings.system_prompt || '',
         model: settings.model || '',
         temperature: settings.temperature ?? 0.7,
-        contextTurns: settings.contextTurns ?? 20,
-        maxTokens: settings.maxTokens ?? 4096,
+        context_turns: settings.context_turns ?? 20,
+        max_tokens: settings.max_tokens ?? 4096,
       });
     }
   }, [settings]);
@@ -45,8 +45,8 @@ export default function Settings({ settings, onSave, onClose }) {
             <label>System Prompt</label>
             <textarea
               className="settings-textarea"
-              value={form.systemPrompt}
-              onChange={(e) => handleChange('systemPrompt', e.target.value)}
+              value={form.system_prompt}
+              onChange={(e) => handleChange('system_prompt', e.target.value)}
               rows={6}
             />
           </div>
@@ -78,8 +78,8 @@ export default function Settings({ settings, onSave, onClose }) {
               <input
                 type="number"
                 className="settings-input"
-                value={form.contextTurns}
-                onChange={(e) => handleChange('contextTurns', parseInt(e.target.value) || 0)}
+                value={form.context_turns}
+                onChange={(e) => handleChange('context_turns', parseInt(e.target.value) || 0)}
                 min="1"
                 max="100"
               />
@@ -89,8 +89,8 @@ export default function Settings({ settings, onSave, onClose }) {
               <input
                 type="number"
                 className="settings-input"
-                value={form.maxTokens}
-                onChange={(e) => handleChange('maxTokens', parseInt(e.target.value) || 0)}
+                value={form.max_tokens}
+                onChange={(e) => handleChange('max_tokens', parseInt(e.target.value) || 0)}
                 min="256"
                 max="32000"
               />
