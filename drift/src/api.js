@@ -58,3 +58,20 @@ export function updateSettings(settings) {
     body: JSON.stringify(settings),
   });
 }
+
+export function getMemories() {
+  return fetchWithAuth(`${API_URL}/api/memories`);
+}
+
+export function addMemory(summary) {
+  return fetchWithAuth(`${API_URL}/api/memories`, {
+    method: 'POST',
+    body: JSON.stringify({ summary }),
+  });
+}
+
+export function deleteMemory(id) {
+  return fetchWithAuth(`${API_URL}/api/memories/${id}`, {
+    method: 'DELETE',
+  });
+}

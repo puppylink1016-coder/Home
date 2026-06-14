@@ -2,6 +2,7 @@ import { useState, useEffect, useCallback } from 'react';
 import Sidebar from './components/Sidebar.jsx';
 import ChatView from './components/ChatView.jsx';
 import Settings from './components/Settings.jsx';
+import Memories from './components/Memories.jsx';
 import * as api from './api.js';
 
 function App() {
@@ -11,6 +12,7 @@ function App() {
   const [settings, setSettings] = useState(null);
   const [loading, setLoading] = useState(false);
   const [showSettings, setShowSettings] = useState(false);
+  const [showMemories, setShowMemories] = useState(false);
   const [sidebarCollapsed, setSidebarCollapsed] = useState(window.innerWidth < 768);
 
   useEffect(() => {
@@ -132,6 +134,7 @@ function App() {
         onDeleteSession={handleDeleteSession}
         onRenameSession={handleRenameSession}
         onOpenSettings={() => setShowSettings(true)}
+        onOpenMemories={() => setShowMemories(true)}
         collapsed={sidebarCollapsed}
         onToggle={() => setSidebarCollapsed((v) => !v)}
       />
@@ -154,6 +157,9 @@ function App() {
           onSave={handleSaveSettings}
           onClose={() => setShowSettings(false)}
         />
+      )}
+      {showMemories && (
+        <Memories onClose={() => setShowMemories(false)} />
       )}
     </div>
   );

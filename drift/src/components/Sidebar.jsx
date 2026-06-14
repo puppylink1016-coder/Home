@@ -16,6 +16,7 @@ export default function Sidebar({
   onDeleteSession,
   onRenameSession,
   onOpenSettings,
+  onOpenMemories,
   collapsed,
   onToggle,
 }) {
@@ -81,6 +82,14 @@ export default function Sidebar({
           ))}
         </div>
         <div className="sidebar-footer">
+          <button className="settings-btn" onClick={onOpenMemories}>
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5">
+              <path d="M12 6.5a3.5 3.5 0 1 0 0 7 3.5 3.5 0 0 0 0-7Z" />
+              <path d="M12 2C6.5 2 2 6.5 2 12s4.5 10 10 10 10-4.5 10-10S17.5 2 12 2Z" />
+              <path d="M12 17v.5" /><path d="M12 6V2" />
+            </svg>
+            记忆库
+          </button>
           <button className="settings-btn" onClick={onOpenSettings}>
             <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5">
               <circle cx="12" cy="12" r="3" />
