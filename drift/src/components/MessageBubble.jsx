@@ -30,7 +30,9 @@ export default function MessageBubble({ message }) {
   return (
     <div className={`message-row ${isUser ? 'message-row-user' : 'message-row-ai'}`} ref={ref}>
       {!isUser && (
-        <div className="avatar avatar-ai">聿</div>
+        <div className="avatar avatar-ai">
+          <img src="/avatar-ai.jpg" alt="聿" />
+        </div>
       )}
       <div className={`message-bubble ${isUser ? 'bubble-user' : 'bubble-ai'}`}>
         <div
@@ -40,7 +42,9 @@ export default function MessageBubble({ message }) {
         <div className="message-time">{formatTime(message.created_at)}</div>
       </div>
       {isUser && (
-        <div className="avatar avatar-user">昭</div>
+        <div className="avatar avatar-user">
+          <img src="/avatar-user.jpg" alt="昭" />
+        </div>
       )}
     </div>
   );

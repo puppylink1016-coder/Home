@@ -224,6 +224,8 @@ body {
   display: flex;
   flex-direction: column;
   gap: 8px;
+  background: url('/bg.jpg') repeat center;
+  background-size: cover;
 }
 
 .messages-container::-webkit-scrollbar {
