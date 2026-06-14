@@ -118,15 +118,27 @@ body {
   cursor: pointer;
   margin-bottom: 2px;
   transition: background 0.15s;
+  display: flex;
+  align-items: center;
+  gap: 8px;
 }
 
 .session-item:hover {
   background: var(--hover);
 }
 
+.session-item:hover .session-delete-btn {
+  opacity: 1;
+}
+
 .session-active {
   background: var(--hover);
   border-left: 3px solid var(--accent);
+}
+
+.session-info {
+  flex: 1;
+  min-width: 0;
 }
 
 .session-name {
@@ -141,6 +153,24 @@ body {
   font-size: 11px;
   color: var(--text-muted);
   margin-top: 2px;
+}
+
+.session-delete-btn {
+  opacity: 0;
+  background: none;
+  border: none;
+  color: var(--text-muted);
+  cursor: pointer;
+  padding: 4px;
+  border-radius: 4px;
+  display: flex;
+  align-items: center;
+  flex-shrink: 0;
+  transition: opacity 0.15s, color 0.15s;
+}
+
+.session-delete-btn:hover {
+  color: #e74c3c;
 }
 
 .sidebar-footer {
@@ -695,6 +725,10 @@ body {
 
   .input-bar {
     padding: 10px 12px 14px;
+  }
+
+  .session-delete-btn {
+    opacity: 0.6;
   }
 }
 
