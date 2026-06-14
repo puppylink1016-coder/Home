@@ -31,8 +31,16 @@ function auth(req, res, next) {
 }
 
 // Health check (no auth)
-app.get('/health', (req, res) => {
-  res.json({ status: 'ok' });
+app.get('/health', async (req, res) => {
+  try {
+    const { data, error } = await supabase.from('settings').select('id').limit(1);
+    res.json({
+      status: 'ok',
+      db: error ? `error: ${error.message}` : `connected, rows: ${data?.length}`,
+    });
+  } catch (err) {
+    res.json({ status: 'ok', db: `exception: ${err.message}` });
+  }
 });
 
 // Auth temporarily disabled for initial testing
@@ -128,12 +136,23 @@ app.get('/api/settings', async (req, res) => {
       .from('settings')
       .select('*')
       .eq('id', 1)
-      .single();
+      .maybeSingle();
 
     if (error) throw error;
+
+    if (!data) {
+      const { data: created, error: insErr } = await supabase
+        .from('settings')
+        .insert({ id: 1, system_prompt: '' })
+        .select()
+        .single();
+      if (insErr) throw insErr;
+      return res.json(created);
+    }
+
     res.json(data);
   } catch (err) {
-    res.status(500).json({ error: err.message });
+    res.status(500).json({ error: err.message, hint: 'Check Supabase RLS policies' });
   }
 });
 
