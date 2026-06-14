@@ -35,8 +35,8 @@ app.get('/health', (req, res) => {
   res.json({ status: 'ok' });
 });
 
-// Apply auth to all /api routes
-app.use('/api', auth);
+// Auth temporarily disabled for initial testing
+// app.use('/api', auth);
 
 // List sessions
 app.get('/api/sessions', async (req, res) => {

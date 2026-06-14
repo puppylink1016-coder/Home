@@ -20,11 +20,11 @@ function App() {
       if (list.length > 0) {
         setCurrentSessionId(list[0].id);
       }
-    }).catch(() => {});
+    }).catch((e) => console.error('getSessions failed:', e));
 
     api.getSettings().then((data) => {
       setSettings(data);
-    }).catch(() => {});
+    }).catch((e) => console.error('getSettings failed:', e));
   }, []);
 
   useEffect(() => {
