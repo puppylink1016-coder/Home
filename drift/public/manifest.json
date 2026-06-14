@@ -1,0 +1,24 @@
+{
+  "name": "Drift - 漂流",
+  "short_name": "Drift",
+  "description": "私人聊天",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#dae8f4",
+  "theme_color": "#dae8f4",
+  "orientation": "portrait",
+  "icons": [
+    {
+      "src": "/avatar-ai.jpg",
+      "sizes": "192x192",
+      "type": "image/jpeg",
+      "purpose": "any"
+    },
+    {
+      "src": "/avatar-ai.jpg",
+      "sizes": "512x512",
+      "type": "image/jpeg",
+      "purpose": "any"
+    }
+  ]
+}
