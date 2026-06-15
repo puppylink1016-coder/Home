@@ -75,3 +75,21 @@ export function deleteMemory(id) {
     method: 'DELETE',
   });
 }
+
+export function getOmbreMemories() {
+  return fetchWithAuth(`${API_URL}/api/ombre/memories`);
+}
+
+export function addOmbreMemory(content) {
+  return fetchWithAuth(`${API_URL}/api/ombre/memories`, {
+    method: 'POST',
+    body: JSON.stringify({ content }),
+  });
+}
+
+export function searchOmbreMemories(query) {
+  return fetchWithAuth(`${API_URL}/api/ombre/search`, {
+    method: 'POST',
+    body: JSON.stringify({ query }),
+  });
+}

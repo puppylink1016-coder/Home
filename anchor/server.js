@@ -606,6 +606,37 @@ app.delete('/api/memories/:id', async (req, res) => {
   }
 });
 
+// Ombre Brain memories (semantic)
+app.get('/api/ombre/memories', async (req, res) => {
+  try {
+    const result = await callOmbreTool('pulse', {});
+    res.json({ raw: result });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.post('/api/ombre/memories', async (req, res) => {
+  try {
+    const { content } = req.body;
+    if (!content) return res.status(400).json({ error: 'content is required' });
+    const result = await callOmbreTool('hold', { content });
+    res.json({ success: true, result });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.post('/api/ombre/search', async (req, res) => {
+  try {
+    const { query } = req.body;
+    const result = await callOmbreTool('breath', { query: query || '' });
+    res.json({ result });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
 app.listen(PORT, () => {
   console.log(`Anchor listening on port ${PORT}`);
 });

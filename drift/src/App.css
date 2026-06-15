@@ -673,6 +673,62 @@ body {
   opacity: 0.85;
 }
 
+/* Memory tabs */
+.mem-tabs {
+  display: flex;
+  padding: 0 16px;
+  gap: 4px;
+  border-bottom: 1px solid var(--border);
+}
+
+.mem-tab {
+  flex: 1;
+  background: none;
+  border: none;
+  padding: 10px 0;
+  font-size: 13px;
+  color: var(--text-muted);
+  cursor: pointer;
+  border-bottom: 2px solid transparent;
+  transition: color 0.15s, border-color 0.15s;
+  font-family: inherit;
+}
+
+.mem-tab:hover {
+  color: var(--text);
+}
+
+.mem-tab-active {
+  color: var(--accent);
+  border-bottom-color: var(--accent);
+  font-weight: 600;
+}
+
+.mem-search-row {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+}
+
+.mem-search-row .settings-input {
+  flex: 1;
+  min-width: 0;
+}
+
+.mem-search-row .save-btn {
+  flex-shrink: 0;
+  padding: 8px 16px;
+}
+
+.memory-label {
+  font-size: 11px;
+  color: var(--accent);
+  font-weight: 600;
+  margin-bottom: 4px;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+
 /* Memories modal */
 .memories-modal {
   background: var(--sidebar-bg);
