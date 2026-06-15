@@ -80,6 +80,10 @@ export function getOmbreMemories() {
   return fetchWithAuth(`${API_URL}/api/ombre/memories`);
 }
 
+export function getAllOmbreMemories() {
+  return fetchWithAuth(`${API_URL}/api/ombre/memories/all`);
+}
+
 export function addOmbreMemory(content) {
   return fetchWithAuth(`${API_URL}/api/ombre/memories`, {
     method: 'POST',

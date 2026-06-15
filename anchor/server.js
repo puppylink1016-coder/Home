@@ -683,6 +683,15 @@ app.get('/api/ombre/memories', async (req, res) => {
   }
 });
 
+app.get('/api/ombre/memories/all', async (req, res) => {
+  try {
+    const result = await callOmbreTool('breath', { importance_min: 1, max_results: 50 });
+    res.json({ result });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
 app.post('/api/ombre/memories', async (req, res) => {
   try {
     const { content } = req.body;

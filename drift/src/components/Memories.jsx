@@ -5,10 +5,13 @@ export default function Memories({ onClose }) {
   const [tab, setTab] = useState('ombre');
   const [staticMems, setStaticMems] = useState([]);
   const [ombreStats, setOmbreStats] = useState(null);
+  const [ombreList, setOmbreList] = useState([]);
   const [newText, setNewText] = useState('');
   const [searchQuery, setSearchQuery] = useState('');
   const [searchResult, setSearchResult] = useState('');
   const [loading, setLoading] = useState(true);
+  const [listLoading, setListLoading] = useState(false);
+  const [showList, setShowList] = useState(false);
 
   function parseOmbreStats(raw) {
     if (!raw) return null;
@@ -27,6 +30,34 @@ export default function Memories({ onClose }) {
     };
   }
 
+  function parseMemoryList(raw) {
+    if (!raw) return [];
+    const blocks = raw.split(/📌 记忆桶:/);
+    const items = [];
+    for (let i = 1; i < blocks.length; i++) {
+      const block = blocks[i];
+      const idMatch = block.match(/^(\S+)/);
+      const lines = block.split('\n').filter(l => l.trim());
+      const contentLines = lines.filter(l =>
+        !l.includes('[主题:') && !l.includes('bucket_id:') && !l.startsWith('---')
+      );
+      const content = contentLines.join('\n').trim();
+      if (content) {
+        items.push({ id: idMatch ? idMatch[1] : i, content });
+      }
+    }
+    if (items.length === 0 && raw.length > 0) {
+      const fallbackBlocks = raw.split(/\[权重:[\d.]+\]/).filter(b => b.trim());
+      for (let i = 0; i < fallbackBlocks.length; i++) {
+        const text = fallbackBlocks[i].replace(/\[bucket_id:\w+\]|\[主题:\S+\]|\[情感:\S+\]|📌 记忆桶:\s*\S+/g, '').trim();
+        if (text && text.length > 10) {
+          items.push({ id: i, content: text });
+        }
+      }
+    }
+    return items;
+  }
+
   useEffect(() => {
     if (tab === 'static') {
       setLoading(true);
@@ -41,12 +72,21 @@ export default function Memories({ onClose }) {
     }
   }, [tab]);
 
+  const loadAllMemories = () => {
+    setListLoading(true);
+    setShowList(true);
+    api.getAllOmbreMemories().then((data) => {
+      setOmbreList(parseMemoryList(data.result));
+    }).catch(() => setOmbreList([])).finally(() => setListLoading(false));
+  };
+
   const handleAddOmbre = () => {
     const text = newText.trim();
     if (!text) return;
     api.addOmbreMemory(text).then(() => {
       setNewText('');
       api.getOmbreMemories().then((data) => setOmbreStats(parseOmbreStats(data.raw)));
+      if (showList) loadAllMemories();
     }).catch(() => {});
   };
 
@@ -117,7 +157,27 @@ export default function Memories({ onClose }) {
                   <span className="ombre-stat">未连接</span>
                 )}
               </div>
-              <div className="ombre-hint">语义记忆按相关性自动检索，输入关键词搜索具体内容</div>
+
+              {!showList && (
+                <button className="ombre-show-all" onClick={loadAllMemories}>
+                  查看全部记忆
+                </button>
+              )}
+
+              {showList && listLoading && (
+                <div className="memories-empty">加载记忆中...</div>
+              )}
+
+              {showList && !listLoading && ombreList.length === 0 && (
+                <div className="memories-empty">暂无记忆内容</div>
+              )}
+
+              {showList && !listLoading && ombreList.map((m, i) => (
+                <div key={m.id || i} className="memory-card">
+                  <div className="memory-text">{m.content}</div>
+                </div>
+              ))}
+
               <div className="mem-search-row">
                 <input
                   className="settings-input"

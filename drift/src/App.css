@@ -755,6 +755,23 @@ body {
   padding: 0 2px;
 }
 
+.ombre-show-all {
+  background: #f4f8fb;
+  border: 1px dashed var(--border);
+  border-radius: 8px;
+  padding: 10px;
+  font-size: 13px;
+  color: var(--accent);
+  cursor: pointer;
+  width: 100%;
+  font-family: inherit;
+  transition: background 0.15s;
+}
+
+.ombre-show-all:hover {
+  background: #e8f0f6;
+}
+
 .memory-label {
   font-size: 11px;
   color: var(--accent);
