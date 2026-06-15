@@ -720,6 +720,41 @@ body {
   padding: 8px 16px;
 }
 
+.ombre-stats {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 14px;
+  background: #f4f8fb;
+  border-radius: 10px;
+  border: 1px solid var(--border);
+}
+
+.ombre-stat {
+  font-size: 13px;
+  color: var(--text-muted);
+  font-weight: 500;
+}
+
+.ombre-stat:first-child {
+  color: var(--text);
+  font-weight: 600;
+}
+
+.ombre-stat-dot {
+  width: 4px;
+  height: 4px;
+  border-radius: 50%;
+  background: #4cd964;
+  flex-shrink: 0;
+}
+
+.ombre-hint {
+  font-size: 12px;
+  color: var(--text-muted);
+  padding: 0 2px;
+}
+
 .memory-label {
   font-size: 11px;
   color: var(--accent);

@@ -4,11 +4,23 @@ import * as api from '../api.js';
 export default function Memories({ onClose }) {
   const [tab, setTab] = useState('ombre');
   const [staticMems, setStaticMems] = useState([]);
-  const [ombreRaw, setOmbreRaw] = useState('');
+  const [ombreStats, setOmbreStats] = useState(null);
   const [newText, setNewText] = useState('');
   const [searchQuery, setSearchQuery] = useState('');
   const [searchResult, setSearchResult] = useState('');
   const [loading, setLoading] = useState(true);
+
+  function parseOmbreStats(raw) {
+    if (!raw) return null;
+    const countMatch = raw.match(/记忆桶数:\s*(\d+)/);
+    const sizeMatch = raw.match(/总存储大小:\s*([\d.]+\s*\w+)/);
+    const decayMatch = raw.match(/衰减引擎:\s*(\S+)/);
+    return {
+      count: countMatch ? parseInt(countMatch[1]) : 0,
+      size: sizeMatch ? sizeMatch[1] : '未知',
+      decay: decayMatch ? decayMatch[1] : '未知',
+    };
+  }
 
   useEffect(() => {
     if (tab === 'static') {
@@ -19,8 +31,8 @@ export default function Memories({ onClose }) {
     } else {
       setLoading(true);
       api.getOmbreMemories().then((data) => {
-        setOmbreRaw(data.raw || '暂无记忆');
-      }).catch(() => setOmbreRaw('连接失败')).finally(() => setLoading(false));
+        setOmbreStats(parseOmbreStats(data.raw));
+      }).catch(() => setOmbreStats(null)).finally(() => setLoading(false));
     }
   }, [tab]);
 
@@ -29,7 +41,7 @@ export default function Memories({ onClose }) {
     if (!text) return;
     api.addOmbreMemory(text).then(() => {
       setNewText('');
-      api.getOmbreMemories().then((data) => setOmbreRaw(data.raw || ''));
+      api.getOmbreMemories().then((data) => setOmbreStats(parseOmbreStats(data.raw)));
     }).catch(() => {});
   };
 
@@ -88,9 +100,19 @@ export default function Memories({ onClose }) {
 
           {!loading && tab === 'ombre' && (
             <>
-              <div className="memory-card">
-                <div className="memory-text">{ombreRaw}</div>
+              <div className="ombre-stats">
+                {ombreStats ? (
+                  <>
+                    <span className="ombre-stat">{ombreStats.count} 条记忆</span>
+                    <span className="ombre-stat">{ombreStats.size}</span>
+                    <span className="ombre-stat-dot" />
+                    <span className="ombre-stat">{ombreStats.decay}</span>
+                  </>
+                ) : (
+                  <span className="ombre-stat">未连接</span>
+                )}
               </div>
+              <div className="ombre-hint">语义记忆按相关性自动检索，输入关键词搜索具体内容</div>
               <div className="mem-search-row">
                 <input
                   className="settings-input"
