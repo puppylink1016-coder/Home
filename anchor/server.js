@@ -301,10 +301,11 @@ app.post('/api/chat', async (req, res) => {
 
     if (setErr) throw setErr;
 
-    // Load memories
+    // Load core memories only (exclude ombre copies)
     const { data: memories } = await supabase
       .from('memories')
       .select('summary')
+      .not('summary', 'like', '[ombre]%')
       .order('created_at', { ascending: true });
 
     // Load recent messages
@@ -685,8 +686,18 @@ app.get('/api/ombre/memories', async (req, res) => {
 
 app.get('/api/ombre/memories/all', async (req, res) => {
   try {
-    const result = await callOmbreTool('dream', {});
-    res.json({ result });
+    const { data, error } = await supabase
+      .from('memories')
+      .select('*')
+      .like('summary', '[ombre]%')
+      .order('created_at', { ascending: true });
+    if (error) throw error;
+    const items = (data || []).map(m => ({
+      id: m.id,
+      content: m.summary.replace(/^\[ombre\]\s*/, ''),
+      created_at: m.created_at,
+    }));
+    res.json({ items });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
@@ -697,6 +708,7 @@ app.post('/api/ombre/memories', async (req, res) => {
     const { content } = req.body;
     if (!content) return res.status(400).json({ error: 'content is required' });
     const result = await callOmbreTool('hold', { content });
+    await supabase.from('memories').insert({ summary: `[ombre] ${content}` });
     res.json({ success: true, result });
   } catch (err) {
     res.status(500).json({ error: err.message });

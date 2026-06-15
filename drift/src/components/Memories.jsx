@@ -30,25 +30,6 @@ export default function Memories({ onClose }) {
     };
   }
 
-  function parseMemoryList(raw) {
-    if (!raw) return [];
-    const blocks = raw.split(/\n---\n/);
-    const items = [];
-    for (const block of blocks) {
-      const idMatch = block.match(/ID:\s*(\S+)/);
-      const lines = block.split('\n').filter(l => l.trim());
-      const contentLines = lines.filter(l =>
-        !l.startsWith('===') && !l.startsWith('以下是') && !l.startsWith('- ') &&
-        !l.startsWith('想完之后') && !l.startsWith('valence') && !l.startsWith('没有沉淀') &&
-        !l.match(/^\[.+\] \[未解决|已解决\]/) && !l.startsWith('ID:')
-      );
-      const content = contentLines.join('\n').trim();
-      if (content && content.length > 5) {
-        items.push({ id: idMatch ? idMatch[1] : items.length, content });
-      }
-    }
-    return items;
-  }
 
   useEffect(() => {
     if (tab === 'static') {
@@ -68,7 +49,7 @@ export default function Memories({ onClose }) {
     setListLoading(true);
     setShowList(true);
     api.getAllOmbreMemories().then((data) => {
-      setOmbreList(parseMemoryList(data.result));
+      setOmbreList(data.items || []);
     }).catch(() => setOmbreList([])).finally(() => setListLoading(false));
   };
 
