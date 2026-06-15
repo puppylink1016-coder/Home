@@ -19,6 +19,88 @@ const supabase = createClient(
   process.env.SUPABASE_KEY
 );
 
+// --- Ombre Brain MCP Client ---
+const OMBRE_BRAIN_URL = process.env.OMBRE_BRAIN_URL || '';
+let ombreSessionId = null;
+let ombreCallId = 0;
+
+function parseSSEResponse(text) {
+  const lines = text.split('\n');
+  for (const line of lines) {
+    if (line.startsWith('data: ')) {
+      try { return JSON.parse(line.substring(6)); } catch (e) { /* ignore */ }
+    }
+  }
+  try { return JSON.parse(text); } catch (e) { return null; }
+}
+
+async function initOmbreSession() {
+  if (!OMBRE_BRAIN_URL) return false;
+  try {
+    const res = await fetch(`${OMBRE_BRAIN_URL}/mcp`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'Accept': 'application/json, text/event-stream' },
+      body: JSON.stringify({
+        jsonrpc: '2.0', method: 'initialize',
+        params: { protocolVersion: '2024-11-05', capabilities: {}, clientInfo: { name: 'anchor', version: '1.0' } },
+        id: ++ombreCallId
+      })
+    });
+    ombreSessionId = res.headers.get('mcp-session-id');
+
+    await fetch(`${OMBRE_BRAIN_URL}/mcp`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'Accept': 'application/json, text/event-stream', 'Mcp-Session-Id': ombreSessionId },
+      body: JSON.stringify({ jsonrpc: '2.0', method: 'notifications/initialized' })
+    });
+
+    console.log('Ombre Brain connected:', OMBRE_BRAIN_URL);
+    return true;
+  } catch (err) {
+    console.error('Ombre Brain init failed:', err.message);
+    ombreSessionId = null;
+    return false;
+  }
+}
+
+async function callOmbreTool(toolName, args = {}) {
+  if (!OMBRE_BRAIN_URL) return null;
+  try {
+    if (!ombreSessionId) {
+      const ok = await initOmbreSession();
+      if (!ok) return null;
+    }
+
+    const res = await fetch(`${OMBRE_BRAIN_URL}/mcp`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Accept': 'application/json, text/event-stream',
+        'Mcp-Session-Id': ombreSessionId
+      },
+      body: JSON.stringify({
+        jsonrpc: '2.0', method: 'tools/call',
+        params: { name: toolName, arguments: args },
+        id: ++ombreCallId
+      })
+    });
+
+    const text = await res.text();
+    const parsed = parseSSEResponse(text);
+    if (parsed && parsed.result && parsed.result.content) {
+      return parsed.result.content
+        .filter(c => c.type === 'text')
+        .map(c => c.text)
+        .join('\n');
+    }
+    return parsed ? JSON.stringify(parsed) : null;
+  } catch (err) {
+    console.error(`Ombre Brain ${toolName} failed:`, err.message);
+    ombreSessionId = null;
+    return null;
+  }
+}
+
 function auth(req, res, next) {
   if (!process.env.AUTH_TOKEN) return next();
 
@@ -29,6 +111,12 @@ function auth(req, res, next) {
   if (token === process.env.AUTH_TOKEN) return next();
   return res.status(401).json({ error: 'Unauthorized' });
 }
+
+// Test Ombre Brain connection
+app.get('/test-ombre', async (req, res) => {
+  const result = await callOmbreTool('breath', {});
+  res.json({ connected: !!result, result });
+});
 
 // Health check (no auth)
 app.get('/health', async (req, res) => {
@@ -230,11 +318,24 @@ app.post('/api/chat', async (req, res) => {
 
     if (recErr) throw recErr;
 
+    // Retrieve relevant memories from Ombre Brain (semantic search)
+    let ombreMemories = null;
+    if (OMBRE_BRAIN_URL) {
+      ombreMemories = await callOmbreTool('breath', { query: message });
+    }
+
     // Build messages array for API
     let systemContent = settings.system_prompt || '';
+
+    // Add Ombre Brain memories (semantic, relevant to current message)
+    if (ombreMemories) {
+      systemContent += '\n\n## 相关记忆（语义检索）\n' + ombreMemories;
+    }
+
+    // Add static memories from Supabase (always included)
     if (memories && memories.length > 0) {
       const memText = memories.map(m => m.summary).join('\n');
-      systemContent += '\n\n## 记忆摘要\n' + memText;
+      systemContent += '\n\n## 长期记忆\n' + memText;
     }
 
     const apiMessages = [];
@@ -361,10 +462,15 @@ async function compress(sessionId, settings) {
 
   if (!summary) return;
 
-  // Save memory
+  // Save memory to Supabase
   await supabase
     .from('memories')
     .insert({ summary });
+
+  // Also archive to Ombre Brain for semantic search
+  if (OMBRE_BRAIN_URL) {
+    await callOmbreTool('grow', { content: summary }).catch(() => {});
+  }
 
   // Hide compressed messages
   const ids = toCompress.map(m => m.id);
