@@ -349,28 +349,95 @@ app.post('/api/chat', async (req, res) => {
       apiMessages.push({ role: msg.role, content: msg.content });
     }
 
+    // Define tools the model can use
+    const tools = [];
+    if (OMBRE_BRAIN_URL) {
+      tools.push({
+        type: 'function',
+        function: {
+          name: 'save_memory',
+          description: '将重要的信息、事件、情感时刻存入语义记忆库。当对话中出现值得长期记住的内容时主动调用。用第一人称书写。',
+          parameters: {
+            type: 'object',
+            properties: {
+              content: {
+                type: 'string',
+                description: '要存入记忆的内容'
+              }
+            },
+            required: ['content']
+          }
+        }
+      });
+    }
+
     // Call OpenRouter
-    const response = await fetch('https://openrouter.ai/api/v1/chat/completions', {
+    const requestBody = {
+      model: settings.model,
+      messages: apiMessages,
+      temperature: settings.temperature,
+      max_tokens: settings.max_tokens
+    };
+    if (tools.length > 0) {
+      requestBody.tools = tools;
+    }
+
+    let response = await fetch('https://openrouter.ai/api/v1/chat/completions', {
       method: 'POST',
       headers: {
         'Authorization': `Bearer ${process.env.OPENROUTER_API_KEY}`,
         'Content-Type': 'application/json'
       },
-      body: JSON.stringify({
-        model: settings.model,
-        messages: apiMessages,
-        temperature: settings.temperature,
-        max_tokens: settings.max_tokens
-      })
+      body: JSON.stringify(requestBody)
     });
 
-    const data = await response.json();
+    let data = await response.json();
 
     if (!response.ok) {
       throw new Error(data.error?.message || `OpenRouter returned ${response.status}`);
     }
 
-    const rawContent = data.choices?.[0]?.message?.content;
+    let assistantMsg = data.choices?.[0]?.message;
+
+    // Handle tool calls (model wants to save a memory)
+    let toolRounds = 0;
+    while (assistantMsg?.tool_calls && assistantMsg.tool_calls.length > 0 && toolRounds < 3) {
+      toolRounds++;
+      apiMessages.push(assistantMsg);
+
+      for (const tc of assistantMsg.tool_calls) {
+        let toolResult = '未知工具';
+        if (tc.function.name === 'save_memory') {
+          try {
+            const args = JSON.parse(tc.function.arguments);
+            const result = await callOmbreTool('hold', { content: args.content });
+            toolResult = result || '记忆已保存';
+            console.log('Model saved memory:', args.content.substring(0, 80));
+          } catch (e) {
+            toolResult = '保存失败: ' + e.message;
+          }
+        }
+        apiMessages.push({ role: 'tool', tool_call_id: tc.id, content: toolResult });
+      }
+
+      requestBody.messages = apiMessages;
+      response = await fetch('https://openrouter.ai/api/v1/chat/completions', {
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${process.env.OPENROUTER_API_KEY}`,
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify(requestBody)
+      });
+
+      data = await response.json();
+      if (!response.ok) {
+        throw new Error(data.error?.message || `OpenRouter returned ${response.status}`);
+      }
+      assistantMsg = data.choices?.[0]?.message;
+    }
+
+    const rawContent = assistantMsg?.content;
     if (!rawContent) {
       throw new Error('No response content from model');
     }
