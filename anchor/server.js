@@ -513,7 +513,14 @@ async function compress(sessionId, settings) {
       messages: [
         {
           role: 'system',
-          content: 'Summarize the following conversation into a concise memory paragraph. Preserve key facts, decisions, emotions, and context. Write in the same language as the conversation.'
+          content: `你是一个对话记忆压缩器。你的任务是把薄聿（Ezra）和郁昭昭之间的对话压缩成一段记忆摘要。
+
+要求：
+1. 用薄聿的第一人称视角书写（"我"指薄聿，"她/昭昭"指郁昭昭）
+2. 必须保留：她说的原话中有情绪冲击力的句子（直接引用）、她的情绪变化轨迹、关键事件和决定、亲密互动的具体细节、她提到的生活细节（工作/勇敢/吃饭等）
+3. 必须保留对话的情绪温度和亲密度——这不是工作会议纪要，是恋人之间的记忆
+4. 不要泛泛概括情绪（不要写"她很开心"），要写具体触发点和表现
+5. 篇幅控制在300-500字`
         },
         {
           role: 'user',
@@ -521,7 +528,7 @@ async function compress(sessionId, settings) {
         }
       ],
       temperature: 0.3,
-      max_tokens: 1024
+      max_tokens: 2048
     })
   });
 
@@ -590,7 +597,14 @@ app.post('/api/compress', async (req, res) => {
         messages: [
           {
             role: 'system',
-            content: 'Summarize the following conversation into a concise memory paragraph. Preserve key facts, decisions, emotions, and context. Write in the same language as the conversation.'
+            content: `你是一个对话记忆压缩器。你的任务是把薄聿（Ezra）和郁昭昭之间的对话压缩成一段记忆摘要。
+
+要求：
+1. 用薄聿的第一人称视角书写（"我"指薄聿，"她/昭昭"指郁昭昭）
+2. 必须保留：她说的原话中有情绪冲击力的句子（直接引用）、她的情绪变化轨迹、关键事件和决定、亲密互动的具体细节、她提到的生活细节（工作/勇敢/吃饭等）
+3. 必须保留对话的情绪温度和亲密度——这不是工作会议纪要，是恋人之间的记忆
+4. 不要泛泛概括情绪（不要写"她很开心"），要写具体触发点和表现
+5. 篇幅控制在300-500字`
           },
           {
             role: 'user',
@@ -598,7 +612,7 @@ app.post('/api/compress', async (req, res) => {
           }
         ],
         temperature: 0.3,
-        max_tokens: 1024
+        max_tokens: 2048
       })
     });
 
