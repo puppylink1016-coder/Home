@@ -32,27 +32,19 @@ export default function Memories({ onClose }) {
 
   function parseMemoryList(raw) {
     if (!raw) return [];
-    const blocks = raw.split(/📌 记忆桶:/);
+    const blocks = raw.split(/\n---\n/);
     const items = [];
-    for (let i = 1; i < blocks.length; i++) {
-      const block = blocks[i];
-      const idMatch = block.match(/^(\S+)/);
+    for (const block of blocks) {
+      const idMatch = block.match(/ID:\s*(\S+)/);
       const lines = block.split('\n').filter(l => l.trim());
       const contentLines = lines.filter(l =>
-        !l.includes('[主题:') && !l.includes('bucket_id:') && !l.startsWith('---')
+        !l.startsWith('===') && !l.startsWith('以下是') && !l.startsWith('- ') &&
+        !l.startsWith('想完之后') && !l.startsWith('valence') && !l.startsWith('没有沉淀') &&
+        !l.match(/^\[.+\] \[未解决|已解决\]/) && !l.startsWith('ID:')
       );
       const content = contentLines.join('\n').trim();
-      if (content) {
-        items.push({ id: idMatch ? idMatch[1] : i, content });
-      }
-    }
-    if (items.length === 0 && raw.length > 0) {
-      const fallbackBlocks = raw.split(/\[权重:[\d.]+\]/).filter(b => b.trim());
-      for (let i = 0; i < fallbackBlocks.length; i++) {
-        const text = fallbackBlocks[i].replace(/\[bucket_id:\w+\]|\[主题:\S+\]|\[情感:\S+\]|📌 记忆桶:\s*\S+/g, '').trim();
-        if (text && text.length > 10) {
-          items.push({ id: i, content: text });
-        }
+      if (content && content.length > 5) {
+        items.push({ id: idMatch ? idMatch[1] : items.length, content });
       }
     }
     return items;
