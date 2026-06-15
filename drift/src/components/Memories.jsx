@@ -12,11 +12,16 @@ export default function Memories({ onClose }) {
 
   function parseOmbreStats(raw) {
     if (!raw) return null;
-    const countMatch = raw.match(/记忆桶数:\s*(\d+)/);
+    const fixedMatch = raw.match(/固化记忆桶:\s*(\d+)/);
+    const dynamicMatch = raw.match(/动态记忆桶:\s*(\d+)/);
+    const archiveMatch = raw.match(/归档记忆桶:\s*(\d+)/);
     const sizeMatch = raw.match(/总存储大小:\s*([\d.]+\s*\w+)/);
     const decayMatch = raw.match(/衰减引擎:\s*(\S+)/);
+    const total = (fixedMatch ? parseInt(fixedMatch[1]) : 0)
+      + (dynamicMatch ? parseInt(dynamicMatch[1]) : 0)
+      + (archiveMatch ? parseInt(archiveMatch[1]) : 0);
     return {
-      count: countMatch ? parseInt(countMatch[1]) : 0,
+      count: total,
       size: sizeMatch ? sizeMatch[1] : '未知',
       decay: decayMatch ? decayMatch[1] : '未知',
     };
