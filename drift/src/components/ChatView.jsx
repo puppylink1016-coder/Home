@@ -43,12 +43,16 @@ export default function ChatView({ messages, loading, onSend, uploading }) {
     if (fileRef.current) fileRef.current.value = '';
   };
 
-  const handleSend = useCallback(() => {
+  const handleSend = useCallback(async () => {
     const trimmed = input.trim();
     if (!trimmed && !imageFile) return;
-    onSend(trimmed, imageFile);
-    setInput('');
-    clearImage();
+    try {
+      await onSend(trimmed, imageFile);
+      setInput('');
+      clearImage();
+    } catch {
+      // upload failed, keep image preview
+    }
     if (textareaRef.current) {
       textareaRef.current.style.height = 'auto';
     }
