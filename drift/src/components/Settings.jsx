@@ -1,4 +1,21 @@
 import { useState, useEffect } from 'react';
+import * as api from '../api.js';
+
+function urlBase64ToUint8Array(base64String) {
+  const padding = '='.repeat((4 - base64String.length % 4) % 4);
+  const base64 = (base64String + padding).replace(/-/g, '+').replace(/_/g, '/');
+  const rawData = window.atob(base64);
+  const outputArray = new Uint8Array(rawData.length);
+
+  for (let i = 0; i < rawData.length; i++) {
+    outputArray[i] = rawData.charCodeAt(i);
+  }
+  return outputArray;
+}
+
+function pushSupported() {
+  return 'serviceWorker' in navigator && 'PushManager' in window && 'Notification' in window;
+}
 
 export default function Settings({ settings, onSave, onClose }) {
   const [form, setForm] = useState({
@@ -7,6 +24,14 @@ export default function Settings({ settings, onSave, onClose }) {
     temperature: 0.7,
     context_turns: 20,
     max_tokens: 4096,
+  });
+  const [pushBusy, setPushBusy] = useState(false);
+  const [pushStatus, setPushStatus] = useState({
+    supported: false,
+    subscribed: false,
+    permission: 'default',
+    endpoint: '',
+    message: '',
   });
 
   useEffect(() => {
@@ -21,12 +46,142 @@ export default function Settings({ settings, onSave, onClose }) {
     }
   }, [settings]);
 
+  useEffect(() => {
+    let active = true;
+    const supported = pushSupported();
+
+    if (!supported) {
+      setPushStatus((prev) => ({
+        ...prev,
+        supported: false,
+        message: '当前浏览器不支持通知。',
+      }));
+      return;
+    }
+
+    navigator.serviceWorker.getRegistration().then(async (registration) => {
+      const subscription = await registration?.pushManager.getSubscription();
+      if (!active) return;
+      setPushStatus({
+        supported: true,
+        subscribed: Boolean(subscription),
+        permission: Notification.permission,
+        endpoint: subscription?.endpoint || '',
+        message: subscription ? '通知已开启。' : '',
+      });
+    }).catch(() => {
+      if (!active) return;
+      setPushStatus({
+        supported: true,
+        subscribed: false,
+        permission: Notification.permission,
+        endpoint: '',
+        message: '',
+      });
+    });
+
+    return () => { active = false; };
+  }, []);
+
   const handleChange = (field, value) => {
     setForm((prev) => ({ ...prev, [field]: value }));
   };
 
   const handleSave = () => {
     onSave(form);
+  };
+
+  const handleEnablePush = async () => {
+    setPushBusy(true);
+    setPushStatus((prev) => ({ ...prev, message: '' }));
+
+    try {
+      if (!pushSupported()) {
+        throw new Error('当前浏览器不支持通知。');
+      }
+
+      const keyInfo = await api.getPushPublicKey();
+      if (!keyInfo.configured || !keyInfo.publicKey) {
+        throw new Error(keyInfo.hint || '推送服务还没有配置。');
+      }
+
+      const permission = await Notification.requestPermission();
+      if (permission !== 'granted') {
+        throw new Error('通知权限没有开启。');
+      }
+
+      await navigator.serviceWorker.register('/sw.js');
+      const readyRegistration = await navigator.serviceWorker.ready;
+      const existing = await readyRegistration.pushManager.getSubscription();
+      const subscription = existing || await readyRegistration.pushManager.subscribe({
+        userVisibleOnly: true,
+        applicationServerKey: urlBase64ToUint8Array(keyInfo.publicKey),
+      });
+
+      await api.subscribePush(subscription.toJSON());
+      setPushStatus({
+        supported: true,
+        subscribed: true,
+        permission,
+        endpoint: subscription.endpoint,
+        message: '通知已开启。',
+      });
+    } catch (err) {
+      setPushStatus((prev) => ({
+        ...prev,
+        supported: pushSupported(),
+        permission: pushSupported() ? Notification.permission : 'default',
+        message: err?.message || '通知开启失败。',
+      }));
+    } finally {
+      setPushBusy(false);
+    }
+  };
+
+  const getCurrentSubscription = async () => {
+    const registration = await navigator.serviceWorker.getRegistration();
+    return registration?.pushManager.getSubscription();
+  };
+
+  const handleTestPush = async () => {
+    setPushBusy(true);
+    setPushStatus((prev) => ({ ...prev, message: '' }));
+
+    try {
+      const subscription = await getCurrentSubscription();
+      const endpoint = subscription?.endpoint || pushStatus.endpoint;
+      if (!endpoint) throw new Error('还没有通知订阅。');
+      const result = await api.testPush(endpoint);
+      if (!result.success) throw new Error('测试推送没有发出。');
+      setPushStatus((prev) => ({ ...prev, message: '测试推送已发送。' }));
+    } catch (err) {
+      setPushStatus((prev) => ({ ...prev, message: err?.message || '测试推送失败。' }));
+    } finally {
+      setPushBusy(false);
+    }
+  };
+
+  const handleDisablePush = async () => {
+    setPushBusy(true);
+    setPushStatus((prev) => ({ ...prev, message: '' }));
+
+    try {
+      const subscription = await getCurrentSubscription();
+      const endpoint = subscription?.endpoint || pushStatus.endpoint;
+      if (endpoint) await api.unsubscribePush(endpoint);
+      if (subscription) await subscription.unsubscribe();
+      setPushStatus({
+        supported: pushSupported(),
+        subscribed: false,
+        permission: pushSupported() ? Notification.permission : 'default',
+        endpoint: '',
+        message: '通知已关闭。',
+      });
+    } catch (err) {
+      setPushStatus((prev) => ({ ...prev, message: err?.message || '关闭失败。' }));
+    } finally {
+      setPushBusy(false);
+    }
   };
 
   return (
@@ -94,6 +249,35 @@ export default function Settings({ settings, onSave, onClose }) {
                 min="256"
                 max="32000"
               />
+            </div>
+          </div>
+          <div className="field-group push-settings">
+            <label>Push Notifications</label>
+            <div className="push-row">
+              <button
+                className="save-btn"
+                onClick={handleEnablePush}
+                disabled={pushBusy || !pushStatus.supported || pushStatus.subscribed}
+              >
+                Enable
+              </button>
+              <button
+                className="secondary-btn"
+                onClick={handleTestPush}
+                disabled={pushBusy || !pushStatus.subscribed}
+              >
+                Test
+              </button>
+              <button
+                className="secondary-btn"
+                onClick={handleDisablePush}
+                disabled={pushBusy || !pushStatus.subscribed}
+              >
+                Off
+              </button>
+            </div>
+            <div className={`push-status ${pushStatus.message && !pushStatus.subscribed ? 'push-status-warn' : ''}`}>
+              {pushBusy ? 'Working...' : (pushStatus.message || (pushStatus.subscribed ? 'Ready.' : 'Off.'))}
             </div>
           </div>
         </div>

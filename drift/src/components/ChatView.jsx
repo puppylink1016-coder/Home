@@ -5,6 +5,7 @@ export default function ChatView({ messages, loading, onSend, uploading }) {
   const [input, setInput] = useState('');
   const [imageFile, setImageFile] = useState(null);
   const [imagePreview, setImagePreview] = useState(null);
+  const [sendError, setSendError] = useState('');
   const messagesEndRef = useRef(null);
   const textareaRef = useRef(null);
   const fileRef = useRef(null);
@@ -31,6 +32,7 @@ export default function ChatView({ messages, loading, onSend, uploading }) {
   const handleImageSelect = (e) => {
     const file = e.target.files?.[0];
     if (!file) return;
+    setSendError('');
     setImageFile(file);
     const url = URL.createObjectURL(file);
     setImagePreview(url);
@@ -46,12 +48,13 @@ export default function ChatView({ messages, loading, onSend, uploading }) {
   const handleSend = useCallback(async () => {
     const trimmed = input.trim();
     if (!trimmed && !imageFile) return;
+    setSendError('');
     try {
       await onSend(trimmed, imageFile);
       setInput('');
       clearImage();
-    } catch {
-      // upload failed, keep image preview
+    } catch (err) {
+      setSendError(err?.message || '图片发送失败，请再试一次。');
     }
     if (textareaRef.current) {
       textareaRef.current.style.height = 'auto';
@@ -102,6 +105,11 @@ export default function ChatView({ messages, loading, onSend, uploading }) {
           </div>
         </div>
       )}
+      {sendError && (
+        <div className="send-error" role="status">
+          {sendError}
+        </div>
+      )}
       <div className="input-bar">
         <input
           ref={fileRef}
@@ -121,7 +129,10 @@ export default function ChatView({ messages, loading, onSend, uploading }) {
           ref={textareaRef}
           className="input-field"
           value={input}
-          onChange={(e) => setInput(e.target.value)}
+          onChange={(e) => {
+            setInput(e.target.value);
+            if (sendError) setSendError('');
+          }}
           onKeyDown={handleKeyDown}
           placeholder="Message"
           rows={1}
