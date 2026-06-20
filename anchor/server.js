@@ -148,11 +148,6 @@ function imageUploadHint(error) {
 }
 
 async function ensureBucket() {
-<<<<<<< HEAD
-  const { data } = await supabaseAdmin.storage.getBucket('chat-images');
-  if (!data) {
-    await supabaseAdmin.storage.createBucket('chat-images', { public: true });
-=======
   const { data, error } = await storageSupabase.storage.getBucket(CHAT_IMAGES_BUCKET);
   if (data && !error) return;
 
@@ -164,7 +159,6 @@ async function ensureBucket() {
 
   if (createError && !/already exists/i.test(createError.message || '')) {
     throw createError;
->>>>>>> d5244c9 (Add Drift web push notifications)
   }
 }
 ensureBucket().catch((err) => {
@@ -189,24 +183,14 @@ app.post('/api/upload', async (req, res) => {
     const ext = (type || 'image/jpeg').split('/')[1] || 'jpg';
     const filename = `${Date.now()}-${Math.random().toString(36).slice(2)}.${ext}`;
 
-<<<<<<< HEAD
-    const { error } = await supabaseAdmin.storage
-      .from('chat-images')
-=======
     const { error } = await storageSupabase.storage
       .from(CHAT_IMAGES_BUCKET)
->>>>>>> d5244c9 (Add Drift web push notifications)
       .upload(filename, buffer, { contentType: type || 'image/jpeg' });
 
     if (error) throw error;
 
-<<<<<<< HEAD
-    const { data: { publicUrl } } = supabaseAdmin.storage
-      .from('chat-images')
-=======
     const { data: { publicUrl } } = storageSupabase.storage
       .from(CHAT_IMAGES_BUCKET)
->>>>>>> d5244c9 (Add Drift web push notifications)
       .getPublicUrl(filename);
 
     res.json({ url: publicUrl });
