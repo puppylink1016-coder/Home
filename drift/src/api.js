@@ -48,14 +48,32 @@ export function sendMessage(message, sessionId) {
   });
 }
 
-export function sendMessageStream(message, sessionId, { onToken, onSession, onDone, onError }) {
+export function uploadImage(file) {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => {
+      const base64 = reader.result.split(',')[1];
+      fetchWithAuth(`${API_URL}/api/upload`, {
+        method: 'POST',
+        body: JSON.stringify({ data: base64, type: file.type }),
+      }).then(resolve).catch(reject);
+    };
+    reader.onerror = reject;
+    reader.readAsDataURL(file);
+  });
+}
+
+export function sendMessageStream(message, sessionId, { onToken, onSession, onDone, onError, imageUrl }) {
   const headers = { 'Content-Type': 'application/json' };
   if (AUTH_TOKEN) headers['Authorization'] = `Bearer ${AUTH_TOKEN}`;
+
+  const body = { message, sessionId };
+  if (imageUrl) body.imageUrl = imageUrl;
 
   fetch(`${API_URL}/api/chat/stream`, {
     method: 'POST',
     headers,
-    body: JSON.stringify({ message, sessionId }),
+    body: JSON.stringify(body),
   }).then(async (response) => {
     if (!response.ok) {
       throw new Error(`HTTP ${response.status}`);

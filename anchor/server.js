@@ -7,7 +7,7 @@ const app = express();
 const PORT = process.env.PORT || 3001;
 
 app.use(cors());
-app.use(express.json());
+app.use(express.json({ limit: '10mb' }));
 
 if (!process.env.SUPABASE_URL || !process.env.SUPABASE_KEY) {
   console.error('Missing SUPABASE_URL or SUPABASE_KEY in environment');
@@ -110,6 +110,54 @@ function auth(req, res, next) {
 
   if (token === process.env.AUTH_TOKEN) return next();
   return res.status(401).json({ error: 'Unauthorized' });
+}
+
+// --- Image Upload ---
+async function ensureBucket() {
+  const { data } = await supabase.storage.getBucket('chat-images');
+  if (!data) {
+    await supabase.storage.createBucket('chat-images', { public: true });
+  }
+}
+ensureBucket().catch(() => {});
+
+app.post('/api/upload', async (req, res) => {
+  try {
+    const { data: base64Data, type } = req.body;
+    if (!base64Data) return res.status(400).json({ error: 'data is required' });
+
+    const buffer = Buffer.from(base64Data, 'base64');
+    const ext = (type || 'image/jpeg').split('/')[1] || 'jpg';
+    const filename = `${Date.now()}-${Math.random().toString(36).slice(2)}.${ext}`;
+
+    const { error } = await supabase.storage
+      .from('chat-images')
+      .upload(filename, buffer, { contentType: type || 'image/jpeg' });
+
+    if (error) throw error;
+
+    const { data: { publicUrl } } = supabase.storage
+      .from('chat-images')
+      .getPublicUrl(filename);
+
+    res.json({ url: publicUrl });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// --- Multimodal helpers ---
+function contentToApiFormat(content) {
+  if (!content) return content;
+  const imgMatch = content.match(/^!\[image\]\((.*?)\)/);
+  if (!imgMatch) return content;
+
+  const imageUrl = imgMatch[1];
+  const text = content.replace(/^!\[image\]\(.*?\)\n?/, '').trim();
+
+  const parts = [{ type: 'image_url', image_url: { url: imageUrl } }];
+  if (text) parts.push({ type: 'text', text });
+  return parts;
 }
 
 // Test Ombre Brain connection
@@ -276,9 +324,9 @@ app.post('/api/chat/stream', async (req, res) => {
   }
 
   try {
-    let { message, sessionId } = req.body;
-    if (!message) {
-      send({ type: 'error', error: 'Message is required' });
+    let { message, sessionId, imageUrl } = req.body;
+    if (!message && !imageUrl) {
+      send({ type: 'error', error: 'Message or image is required' });
       return res.end();
     }
 
@@ -290,7 +338,12 @@ app.post('/api/chat/stream', async (req, res) => {
       send({ type: 'session', sessionId });
     }
 
-    await supabase.from('messages').insert({ session_id: sessionId, role: 'user', content: message });
+    let storedContent = message || '';
+    if (imageUrl) {
+      storedContent = `![image](${imageUrl})` + (message ? `\n${message}` : '');
+    }
+
+    await supabase.from('messages').insert({ session_id: sessionId, role: 'user', content: storedContent });
 
     const { data: settings } = await supabase.from('settings').select('*').eq('id', 1).single();
     const { data: memories } = await supabase
@@ -305,7 +358,7 @@ app.post('/api/chat/stream', async (req, res) => {
       .limit(settings.context_turns);
 
     let ombreMemories = null;
-    if (OMBRE_BRAIN_URL) {
+    if (OMBRE_BRAIN_URL && message) {
       ombreMemories = await callOmbreTool('breath', { query: message });
     }
 
@@ -321,7 +374,7 @@ app.post('/api/chat/stream', async (req, res) => {
     if (systemContent) apiMessages.push({ role: 'system', content: systemContent });
     const contextMessages = recentMessages.reverse();
     for (const msg of contextMessages) {
-      apiMessages.push({ role: msg.role, content: msg.content });
+      apiMessages.push({ role: msg.role, content: contentToApiFormat(msg.content) });
     }
 
     const tools = [];

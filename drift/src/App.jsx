@@ -42,11 +42,32 @@ function App() {
     });
   }, [currentSessionId]);
 
-  const handleSend = useCallback((text) => {
+  const [uploading, setUploading] = useState(false);
+
+  const handleSend = useCallback(async (text, imageFile) => {
+    let imageUrl = null;
+
+    if (imageFile) {
+      setUploading(true);
+      try {
+        const result = await api.uploadImage(imageFile);
+        imageUrl = result.url;
+      } catch {
+        setUploading(false);
+        return;
+      }
+      setUploading(false);
+    }
+
+    let displayContent = text || '';
+    if (imageUrl) {
+      displayContent = `![image](${imageUrl})` + (text ? `\n${text}` : '');
+    }
+
     const userMsg = {
       id: Date.now(),
       role: 'user',
-      content: text,
+      content: displayContent,
       created_at: new Date().toISOString(),
     };
     setMessages((prev) => [...prev, userMsg]);
@@ -54,9 +75,9 @@ function App() {
 
     const streamId = 'stream-' + Date.now();
     let started = false;
-    let activeSessionId = currentSessionId;
 
     api.sendMessageStream(text, currentSessionId, {
+      imageUrl,
       onToken(token) {
         if (!started) {
           started = true;
@@ -74,7 +95,6 @@ function App() {
         }
       },
       onSession(id) {
-        activeSessionId = id;
         setCurrentSessionId(id);
       },
       onDone(data) {
@@ -182,7 +202,7 @@ function App() {
             </div>
           </div>
         </div>
-        <ChatView messages={messages} loading={loading} onSend={handleSend} />
+        <ChatView messages={messages} loading={loading} onSend={handleSend} uploading={uploading} />
       </div>
       {showSettings && (
         <Settings
