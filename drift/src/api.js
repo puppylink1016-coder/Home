@@ -63,7 +63,7 @@ export function uploadImage(file) {
   });
 }
 
-export function sendMessageStream(message, sessionId, { onToken, onSession, onDone, onError, imageUrl }) {
+export function sendMessageStream(message, sessionId, { onToken, onThinking, onSession, onDone, onError, imageUrl }) {
   const headers = { 'Content-Type': 'application/json' };
   if (AUTH_TOKEN) headers['Authorization'] = `Bearer ${AUTH_TOKEN}`;
 
@@ -97,6 +97,7 @@ export function sendMessageStream(message, sessionId, { onToken, onSession, onDo
         try { data = JSON.parse(trimmed.slice(6)); } catch { continue; }
 
         if (data.type === 'token') onToken?.(data.content);
+        else if (data.type === 'thinking') onThinking?.(data.content);
         else if (data.type === 'session') onSession?.(data.sessionId);
         else if (data.type === 'done') onDone?.(data);
         else if (data.type === 'error') onError?.(new Error(data.error));

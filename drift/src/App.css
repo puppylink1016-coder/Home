@@ -499,6 +499,69 @@ body {
   }
 }
 
+/* Thinking block */
+.thinking-wrapper {
+  max-width: 85%;
+  margin-bottom: 4px;
+}
+
+.thinking-block {
+  border-radius: 12px;
+  background: rgba(180, 200, 220, 0.25);
+  overflow: hidden;
+}
+
+.thinking-toggle {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  width: 100%;
+  padding: 6px 12px;
+  border: none;
+  background: none;
+  color: #7a8a9a;
+  font-size: 12px;
+  cursor: pointer;
+  transition: color 0.2s;
+}
+
+.thinking-toggle:hover {
+  color: #4a6a8a;
+}
+
+.thinking-icon {
+  flex-shrink: 0;
+  opacity: 0.7;
+}
+
+.thinking-arrow {
+  margin-left: auto;
+  transition: transform 0.2s;
+}
+
+.thinking-arrow.arrow-up {
+  transform: rotate(180deg);
+}
+
+.thinking-content {
+  padding: 4px 12px 10px;
+  font-size: 12.5px;
+  line-height: 1.5;
+  color: #6a7a8a;
+  border-top: 1px solid rgba(140, 160, 180, 0.15);
+  max-height: 300px;
+  overflow-y: auto;
+}
+
+.thinking-content::-webkit-scrollbar {
+  width: 3px;
+}
+
+.thinking-content::-webkit-scrollbar-thumb {
+  background: rgba(140, 160, 180, 0.3);
+  border-radius: 3px;
+}
+
 /* Image preview */
 .image-preview-bar {
   padding: 8px 16px 0;

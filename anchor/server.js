@@ -399,6 +399,7 @@ app.post('/api/chat/stream', async (req, res) => {
 
     let toolRounds = 0;
     let fullContent = '';
+    let fullThinking = '';
 
     async function streamRound() {
       const requestBody = {
@@ -408,6 +409,12 @@ app.post('/api/chat/stream', async (req, res) => {
         max_tokens: settings.max_tokens,
         stream: true,
       };
+
+      if (settings.model?.includes('claude')) {
+        requestBody.reasoning = { effort: 'high' };
+        requestBody.temperature = 1;
+      }
+
       if (tools.length > 0) requestBody.tools = tools;
 
       const response = await fetch('https://openrouter.ai/api/v1/chat/completions', {
@@ -428,6 +435,7 @@ app.post('/api/chat/stream', async (req, res) => {
       const decoder = new TextDecoder();
       let buffer = '';
       let roundContent = '';
+      let roundThinking = '';
       const toolCallChunks = {};
 
       while (true) {
@@ -451,6 +459,12 @@ app.post('/api/chat/stream', async (req, res) => {
           if (!choice) continue;
 
           const delta = choice.delta || {};
+
+          const thinkingChunk = delta.reasoning_content || delta.reasoning;
+          if (thinkingChunk) {
+            roundThinking += thinkingChunk;
+            send({ type: 'thinking', content: thinkingChunk });
+          }
 
           if (delta.content) {
             roundContent += delta.content;
@@ -505,6 +519,7 @@ app.post('/api/chat/stream', async (req, res) => {
       }
 
       fullContent += roundContent;
+      if (roundThinking) fullThinking += roundThinking;
     }
 
     await streamRound();
@@ -516,10 +531,14 @@ app.post('/api/chat/stream', async (req, res) => {
 
     const parts = fullContent.split('---SPLIT---').map(p => p.trim()).filter(Boolean);
     const savedMessages = [];
-    for (const part of parts) {
+    for (let i = 0; i < parts.length; i++) {
+      let content = parts[i];
+      if (i === 0 && fullThinking) {
+        content = `[THINKING]${fullThinking}[/THINKING]\n${content}`;
+      }
       const { data: saved, error: saveErr } = await supabase
         .from('messages')
-        .insert({ session_id: sessionId, role: 'assistant', content: part })
+        .insert({ session_id: sessionId, role: 'assistant', content })
         .select().single();
       if (saveErr) throw saveErr;
       savedMessages.push(saved);

@@ -76,9 +76,28 @@ function App() {
     const streamPrefix = 'stream-' + Date.now() + '-';
     let started = false;
     let fullContent = '';
+    let thinkingContent = '';
 
     api.sendMessageStream(text, currentSessionId, {
       imageUrl,
+      onThinking(chunk) {
+        if (!started) {
+          started = true;
+          setLoading(false);
+        }
+        thinkingContent += chunk;
+        setMessages((prev) => {
+          const without = prev.filter((m) => !String(m.id).startsWith(streamPrefix));
+          return [...without, {
+            id: streamPrefix + '0',
+            role: 'assistant',
+            content: '',
+            thinking: thinkingContent,
+            thinkingActive: true,
+            streaming: true,
+          }];
+        });
+      },
       onToken(token) {
         if (!started) {
           started = true;
@@ -94,6 +113,7 @@ function App() {
             id: streamPrefix + i,
             role: 'assistant',
             content: p,
+            thinking: i === 0 ? thinkingContent : undefined,
             streaming: i === parts.length - 1,
           }))];
         });
