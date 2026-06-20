@@ -7,9 +7,23 @@ function fetchWithAuth(url, options = {}) {
     ...options.headers,
   };
 
-  return fetch(url, { ...options, headers }).then((res) => {
-    if (!res.ok) throw new Error(`HTTP ${res.status}: ${res.statusText}`);
-    return res.json();
+  return fetch(url, { ...options, headers }).then(async (res) => {
+    const text = await res.text();
+    let data = null;
+    if (text) {
+      try {
+        data = JSON.parse(text);
+      } catch {
+        data = text;
+      }
+    }
+    if (!res.ok) {
+      const detail = typeof data === 'object' && data
+        ? [data.error, data.hint].filter(Boolean).join(' ')
+        : text;
+      throw new Error(detail || `HTTP ${res.status}: ${res.statusText}`);
+    }
+    return data;
   });
 }
 
@@ -153,5 +167,30 @@ export function searchOmbreMemories(query) {
   return fetchWithAuth(`${API_URL}/api/ombre/search`, {
     method: 'POST',
     body: JSON.stringify({ query }),
+  });
+}
+
+export function getPushPublicKey() {
+  return fetchWithAuth(`${API_URL}/api/push/vapid-public-key`);
+}
+
+export function subscribePush(subscription) {
+  return fetchWithAuth(`${API_URL}/api/push/subscribe`, {
+    method: 'POST',
+    body: JSON.stringify({ subscription }),
+  });
+}
+
+export function testPush(endpoint) {
+  return fetchWithAuth(`${API_URL}/api/push/test`, {
+    method: 'POST',
+    body: JSON.stringify({ endpoint }),
+  });
+}
+
+export function unsubscribePush(endpoint) {
+  return fetchWithAuth(`${API_URL}/api/push/unsubscribe`, {
+    method: 'POST',
+    body: JSON.stringify({ endpoint }),
   });
 }

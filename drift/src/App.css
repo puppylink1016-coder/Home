@@ -600,6 +600,18 @@ body {
   justify-content: center;
 }
 
+.send-error {
+  margin: 8px 16px 0;
+  padding: 8px 10px;
+  border: 1px solid rgba(196, 79, 79, 0.22);
+  border-radius: 8px;
+  background: rgba(255, 244, 244, 0.92);
+  color: #9c3535;
+  font-size: 13px;
+  line-height: 1.4;
+  word-break: break-word;
+}
+
 /* Message images */
 .message-image {
   display: block;
@@ -869,6 +881,52 @@ body {
 
 .save-btn:hover {
   opacity: 0.85;
+}
+
+.save-btn:disabled,
+.secondary-btn:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+.secondary-btn {
+  padding: 8px 16px;
+  background: #f4f8fb;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  color: var(--text);
+  font-size: 14px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: border-color 0.15s, color 0.15s;
+}
+
+.secondary-btn:hover {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+
+.push-settings {
+  border-top: 1px solid var(--border);
+  padding-top: 14px;
+}
+
+.push-row {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.push-status {
+  min-height: 18px;
+  color: var(--text-muted);
+  font-size: 13px;
+  line-height: 1.4;
+  word-break: break-word;
+}
+
+.push-status-warn {
+  color: #9c3535;
 }
 
 /* Memory tabs */

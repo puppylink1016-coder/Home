@@ -2,12 +2,13 @@ require('dotenv').config();
 const express = require('express');
 const cors = require('cors');
 const { createClient } = require('@supabase/supabase-js');
+const webpush = require('web-push');
 
 const app = express();
 const PORT = process.env.PORT || 3001;
 
 app.use(cors());
-app.use(express.json({ limit: '10mb' }));
+app.use(express.json({ limit: '20mb' }));
 
 if (!process.env.SUPABASE_URL || !process.env.SUPABASE_KEY) {
   console.error('Missing SUPABASE_URL or SUPABASE_KEY in environment');
@@ -22,6 +23,18 @@ const supabase = createClient(
 const supabaseAdmin = process.env.SUPABASE_SERVICE_ROLE_KEY
   ? createClient(process.env.SUPABASE_URL, process.env.SUPABASE_SERVICE_ROLE_KEY)
   : supabase;
+
+const storageSupabase = supabaseAdmin;
+
+const VAPID_PUBLIC_KEY = process.env.VAPID_PUBLIC_KEY || '';
+const VAPID_PRIVATE_KEY = process.env.VAPID_PRIVATE_KEY || '';
+const VAPID_SUBJECT = process.env.VAPID_SUBJECT || 'mailto:drift@example.com';
+const pushConfigured = Boolean(VAPID_PUBLIC_KEY && VAPID_PRIVATE_KEY);
+
+if (pushConfigured) {
+  webpush.setVapidDetails(VAPID_SUBJECT, VAPID_PUBLIC_KEY, VAPID_PRIVATE_KEY);
+}
+
 
 // --- Ombre Brain MCP Client ---
 const OMBRE_BRAIN_URL = process.env.OMBRE_BRAIN_URL || '';
@@ -117,36 +130,227 @@ function auth(req, res, next) {
 }
 
 // --- Image Upload ---
+const CHAT_IMAGES_BUCKET = 'chat-images';
+const MAX_IMAGE_BYTES = 10 * 1024 * 1024;
+
+function isBucketMissing(error) {
+  return error && /bucket not found/i.test(error.message || '');
+}
+
+function imageUploadHint(error) {
+  if (isBucketMissing(error)) {
+    return `Supabase Storage bucket "${CHAT_IMAGES_BUCKET}" was not found in the project used by Anchor. Create a public bucket with that exact name, or check SUPABASE_URL/SUPABASE_KEY on Render.`;
+  }
+  if (/row-level security|rls/i.test(error?.message || '')) {
+    return `Supabase Storage rejected the upload by RLS policy. Set SUPABASE_SERVICE_ROLE_KEY on Render for Anchor, or add an INSERT policy on storage.objects for bucket "${CHAT_IMAGES_BUCKET}".`;
+  }
+  return undefined;
+}
+
 async function ensureBucket() {
+<<<<<<< HEAD
   const { data } = await supabaseAdmin.storage.getBucket('chat-images');
   if (!data) {
     await supabaseAdmin.storage.createBucket('chat-images', { public: true });
+=======
+  const { data, error } = await storageSupabase.storage.getBucket(CHAT_IMAGES_BUCKET);
+  if (data && !error) return;
+
+  const { error: createError } = await storageSupabase.storage.createBucket(CHAT_IMAGES_BUCKET, {
+    public: true,
+    fileSizeLimit: MAX_IMAGE_BYTES,
+    allowedMimeTypes: ['image/jpeg', 'image/png', 'image/webp', 'image/gif'],
+  });
+
+  if (createError && !/already exists/i.test(createError.message || '')) {
+    throw createError;
+>>>>>>> d5244c9 (Add Drift web push notifications)
   }
 }
-ensureBucket().catch(() => {});
+ensureBucket().catch((err) => {
+  console.warn('Image bucket setup skipped:', err.message);
+});
 
 app.post('/api/upload', async (req, res) => {
   try {
     const { data: base64Data, type } = req.body;
     if (!base64Data) return res.status(400).json({ error: 'data is required' });
+    if (type && !type.startsWith('image/')) {
+      return res.status(400).json({ error: 'Only image uploads are supported' });
+    }
 
     const buffer = Buffer.from(base64Data, 'base64');
+    if (buffer.length > MAX_IMAGE_BYTES) {
+      return res.status(413).json({ error: 'Image is too large. Please choose an image under 10 MB.' });
+    }
+
+    await ensureBucket();
+
     const ext = (type || 'image/jpeg').split('/')[1] || 'jpg';
     const filename = `${Date.now()}-${Math.random().toString(36).slice(2)}.${ext}`;
 
+<<<<<<< HEAD
     const { error } = await supabaseAdmin.storage
       .from('chat-images')
+=======
+    const { error } = await storageSupabase.storage
+      .from(CHAT_IMAGES_BUCKET)
+>>>>>>> d5244c9 (Add Drift web push notifications)
       .upload(filename, buffer, { contentType: type || 'image/jpeg' });
 
     if (error) throw error;
 
+<<<<<<< HEAD
     const { data: { publicUrl } } = supabaseAdmin.storage
       .from('chat-images')
+=======
+    const { data: { publicUrl } } = storageSupabase.storage
+      .from(CHAT_IMAGES_BUCKET)
+>>>>>>> d5244c9 (Add Drift web push notifications)
       .getPublicUrl(filename);
 
     res.json({ url: publicUrl });
   } catch (err) {
-    res.status(500).json({ error: err.message });
+    res.status(500).json({ error: err.message, hint: imageUploadHint(err) });
+  }
+});
+
+// --- Web Push Notifications ---
+function pushSetupHint(error) {
+  const msg = error?.message || '';
+  if (/relation .*push_subscriptions.* does not exist/i.test(msg)) {
+    return 'Create the push_subscriptions table from anchor/setup.sql in Supabase SQL Editor.';
+  }
+  if (/row-level security|rls/i.test(msg)) {
+    return 'Set SUPABASE_SERVICE_ROLE_KEY on Render for Anchor, or add policies for push_subscriptions.';
+  }
+  if (!pushConfigured) {
+    return 'Set VAPID_PUBLIC_KEY and VAPID_PRIVATE_KEY on Render for Anchor.';
+  }
+  return undefined;
+}
+
+function getSubscriptionEndpoint(subscription) {
+  return typeof subscription?.endpoint === 'string' ? subscription.endpoint : '';
+}
+
+function makePushPayload(body = {}) {
+  return JSON.stringify({
+    title: body.title || 'Drift',
+    body: body.body || '薄聿在这里。',
+    url: body.url || '/',
+  });
+}
+
+async function markSubscriptionInactive(endpoint) {
+  if (!endpoint) return;
+  await storageSupabase
+    .from('push_subscriptions')
+    .update({ active: false, updated_at: new Date().toISOString() })
+    .eq('endpoint', endpoint);
+}
+
+async function sendPush(row, payload) {
+  try {
+    await webpush.sendNotification(row.subscription, payload);
+    return { endpoint: row.endpoint, ok: true };
+  } catch (err) {
+    if (err.statusCode === 404 || err.statusCode === 410) {
+      await markSubscriptionInactive(row.endpoint);
+      return { endpoint: row.endpoint, ok: false, expired: true };
+    }
+    return { endpoint: row.endpoint, ok: false, error: err.message };
+  }
+}
+
+app.get('/api/push/vapid-public-key', (req, res) => {
+  res.json({
+    configured: pushConfigured,
+    publicKey: VAPID_PUBLIC_KEY,
+    hint: pushConfigured ? undefined : pushSetupHint(),
+  });
+});
+
+app.post('/api/push/subscribe', async (req, res) => {
+  try {
+    if (!pushConfigured) {
+      return res.status(503).json({ error: 'Push is not configured', hint: pushSetupHint() });
+    }
+
+    const { subscription } = req.body;
+    const endpoint = getSubscriptionEndpoint(subscription);
+    if (!endpoint || !subscription?.keys?.p256dh || !subscription?.keys?.auth) {
+      return res.status(400).json({ error: 'Invalid push subscription' });
+    }
+
+    const { data, error } = await storageSupabase
+      .from('push_subscriptions')
+      .upsert({
+        endpoint,
+        subscription,
+        user_agent: req.headers['user-agent'] || '',
+        active: true,
+        updated_at: new Date().toISOString(),
+      }, { onConflict: 'endpoint' })
+      .select('id, endpoint, active, updated_at')
+      .single();
+
+    if (error) throw error;
+    res.json({ success: true, subscription: data });
+  } catch (err) {
+    res.status(500).json({ error: err.message, hint: pushSetupHint(err) });
+  }
+});
+
+app.post('/api/push/test', async (req, res) => {
+  try {
+    if (!pushConfigured) {
+      return res.status(503).json({ error: 'Push is not configured', hint: pushSetupHint() });
+    }
+
+    const { endpoint } = req.body || {};
+    if (!endpoint) return res.status(400).json({ error: 'endpoint is required' });
+
+    const query = storageSupabase
+      .from('push_subscriptions')
+      .select('endpoint, subscription')
+      .eq('active', true)
+      .eq('endpoint', endpoint)
+      .limit(1);
+
+    const { data, error } = await query;
+    if (error) throw error;
+    if (!data || data.length === 0) {
+      return res.status(404).json({ error: 'No active push subscription found' });
+    }
+
+    const payload = makePushPayload({
+      title: 'Drift',
+      body: '推送已接通。',
+      url: '/',
+    });
+    const results = await Promise.all(data.map((row) => sendPush(row, payload)));
+    const sent = results.filter((r) => r.ok).length;
+    res.json({ success: sent > 0, sent, results });
+  } catch (err) {
+    res.status(500).json({ error: err.message, hint: pushSetupHint(err) });
+  }
+});
+
+app.post('/api/push/unsubscribe', async (req, res) => {
+  try {
+    const { endpoint } = req.body || {};
+    if (!endpoint) return res.status(400).json({ error: 'endpoint is required' });
+
+    const { error } = await storageSupabase
+      .from('push_subscriptions')
+      .update({ active: false, updated_at: new Date().toISOString() })
+      .eq('endpoint', endpoint);
+
+    if (error) throw error;
+    res.json({ success: true });
+  } catch (err) {
+    res.status(500).json({ error: err.message, hint: pushSetupHint(err) });
   }
 });
 
