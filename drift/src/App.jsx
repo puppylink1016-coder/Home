@@ -172,9 +172,15 @@ function App() {
               <path d="M3 12h18M3 6h18M3 18h18" />
             </svg>
           </button>
-          <span className="topbar-title">
-            {sessions.find((s) => s.id === currentSessionId)?.name || 'Drift'}
-          </span>
+          <div className="topbar-profile">
+            <div className="topbar-avatar">
+              <img src="/avatar-ai.jpg" alt="聿" />
+            </div>
+            <div className="topbar-info">
+              <span className="topbar-name">薄聿</span>
+              <span className="topbar-status">Online</span>
+            </div>
+          </div>
         </div>
         <ChatView messages={messages} loading={loading} onSend={handleSend} />
       </div>

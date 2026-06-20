@@ -30,24 +30,14 @@ export default function MessageBubble({ message }) {
 
   return (
     <div className={`message-row ${isUser ? 'message-row-user' : 'message-row-ai'}`} ref={ref}>
-      {!isUser && (
-        <div className="avatar avatar-ai">
-          <img src="/avatar-ai.jpg" alt="聿" />
-        </div>
-      )}
       <div className={`message-bubble ${isUser ? 'bubble-user' : 'bubble-ai'}`}>
         <div
           className="message-text"
           dangerouslySetInnerHTML={{ __html: formatContent(message.content) }}
         />
         {message.streaming && <span className="typing-cursor" />}
-        {!message.streaming && <div className="message-time">{formatTime(message.created_at)}</div>}
+        {!message.streaming && <span className="message-time">{formatTime(message.created_at)}</span>}
       </div>
-      {isUser && (
-        <div className="avatar avatar-user">
-          <img src="/avatar-user.jpg" alt="昭" />
-        </div>
-      )}
     </div>
   );
 }
