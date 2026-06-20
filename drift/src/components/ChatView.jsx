@@ -56,7 +56,6 @@ export default function ChatView({ messages, loading, onSend }) {
         ))}
         {loading && (
           <div className="message-row message-row-ai">
-            <div className="avatar avatar-ai">聿</div>
             <div className="message-bubble bubble-ai">
               <div className="loading-dots">
                 <span></span>
@@ -75,7 +74,7 @@ export default function ChatView({ messages, loading, onSend }) {
           value={input}
           onChange={(e) => setInput(e.target.value)}
           onKeyDown={handleKeyDown}
-          placeholder="说点什么..."
+          placeholder="Message"
           rows={1}
         />
         <button className="send-btn" onClick={handleSend} disabled={!input.trim()}>
