@@ -73,8 +73,9 @@ function App() {
     setMessages((prev) => [...prev, userMsg]);
     setLoading(true);
 
-    const streamId = 'stream-' + Date.now();
+    const streamPrefix = 'stream-' + Date.now() + '-';
     let started = false;
+    let fullContent = '';
 
     api.sendMessageStream(text, currentSessionId, {
       imageUrl,
@@ -82,17 +83,20 @@ function App() {
         if (!started) {
           started = true;
           setLoading(false);
-          setMessages((prev) => [...prev, {
-            id: streamId,
-            role: 'assistant',
-            content: token,
-            streaming: true,
-          }]);
-        } else {
-          setMessages((prev) => prev.map((m) =>
-            m.id === streamId ? { ...m, content: m.content + token } : m
-          ));
         }
+
+        fullContent += token;
+        const parts = fullContent.split('---SPLIT---').map(p => p.trim()).filter(Boolean);
+
+        setMessages((prev) => {
+          const without = prev.filter((m) => !String(m.id).startsWith(streamPrefix));
+          return [...without, ...parts.map((p, i) => ({
+            id: streamPrefix + i,
+            role: 'assistant',
+            content: p,
+            streaming: i === parts.length - 1,
+          }))];
+        });
       },
       onSession(id) {
         setCurrentSessionId(id);
@@ -106,7 +110,7 @@ function App() {
           created_at: m.created_at || new Date().toISOString(),
         }));
         setMessages((prev) => {
-          const without = prev.filter((m) => m.id !== streamId);
+          const without = prev.filter((m) => !String(m.id).startsWith(streamPrefix));
           return [...without, ...final];
         });
         if (data.sessionId && !currentSessionId) {
