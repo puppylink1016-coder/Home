@@ -177,7 +177,7 @@ function App() {
               <img src="/avatar-ai.jpg" alt="聿" />
             </div>
             <div className="topbar-info">
-              <span className="topbar-name">薄聿</span>
+              <span className="topbar-name">主人♡</span>
               <span className="topbar-status">Online</span>
             </div>
           </div>
