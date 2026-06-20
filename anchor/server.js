@@ -264,6 +264,230 @@ app.put('/api/settings', async (req, res) => {
   }
 });
 
+// Streaming chat endpoint (SSE)
+app.post('/api/chat/stream', async (req, res) => {
+  res.setHeader('Content-Type', 'text/event-stream');
+  res.setHeader('Cache-Control', 'no-cache');
+  res.setHeader('Connection', 'keep-alive');
+  res.setHeader('X-Accel-Buffering', 'no');
+
+  function send(obj) {
+    res.write(`data: ${JSON.stringify(obj)}\n\n`);
+  }
+
+  try {
+    let { message, sessionId } = req.body;
+    if (!message) {
+      send({ type: 'error', error: 'Message is required' });
+      return res.end();
+    }
+
+    if (!sessionId) {
+      const { data: session, error } = await supabase
+        .from('sessions').insert({}).select().single();
+      if (error) throw error;
+      sessionId = session.id;
+      send({ type: 'session', sessionId });
+    }
+
+    await supabase.from('messages').insert({ session_id: sessionId, role: 'user', content: message });
+
+    const { data: settings } = await supabase.from('settings').select('*').eq('id', 1).single();
+    const { data: memories } = await supabase
+      .from('memories').select('summary')
+      .not('summary', 'like', '[ombre]%')
+      .order('created_at', { ascending: true });
+
+    const { data: recentMessages } = await supabase
+      .from('messages').select('role, content')
+      .eq('session_id', sessionId).eq('visible', true)
+      .order('created_at', { ascending: false })
+      .limit(settings.context_turns);
+
+    let ombreMemories = null;
+    if (OMBRE_BRAIN_URL) {
+      ombreMemories = await callOmbreTool('breath', { query: message });
+    }
+
+    let systemContent = settings.system_prompt || '';
+    if (ombreMemories) {
+      systemContent += '\n\n## 相关记忆（语义检索）\n' + ombreMemories;
+    }
+    if (memories && memories.length > 0) {
+      systemContent += '\n\n## 长期记忆\n' + memories.map(m => m.summary).join('\n');
+    }
+
+    const apiMessages = [];
+    if (systemContent) apiMessages.push({ role: 'system', content: systemContent });
+    const contextMessages = recentMessages.reverse();
+    for (const msg of contextMessages) {
+      apiMessages.push({ role: msg.role, content: msg.content });
+    }
+
+    const tools = [];
+    if (OMBRE_BRAIN_URL) {
+      tools.push({
+        type: 'function',
+        function: {
+          name: 'save_memory',
+          description: '将重要的信息、事件、情感时刻存入语义记忆库。当对话中出现值得长期记住的内容时主动调用。用第一人称书写。',
+          parameters: {
+            type: 'object',
+            properties: { content: { type: 'string', description: '要存入记忆的内容' } },
+            required: ['content']
+          }
+        }
+      });
+    }
+
+    let toolRounds = 0;
+    let fullContent = '';
+
+    async function streamRound() {
+      const requestBody = {
+        model: settings.model,
+        messages: apiMessages,
+        temperature: settings.temperature,
+        max_tokens: settings.max_tokens,
+        stream: true,
+      };
+      if (tools.length > 0) requestBody.tools = tools;
+
+      const response = await fetch('https://openrouter.ai/api/v1/chat/completions', {
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${process.env.OPENROUTER_API_KEY}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify(requestBody),
+      });
+
+      if (!response.ok) {
+        const err = await response.text();
+        throw new Error(`OpenRouter ${response.status}: ${err}`);
+      }
+
+      const reader = response.body.getReader();
+      const decoder = new TextDecoder();
+      let buffer = '';
+      let roundContent = '';
+      const toolCallChunks = {};
+
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+
+        buffer += decoder.decode(value, { stream: true });
+        const lines = buffer.split('\n');
+        buffer = lines.pop();
+
+        for (const line of lines) {
+          const trimmed = line.trim();
+          if (!trimmed || !trimmed.startsWith('data: ')) continue;
+          const payload = trimmed.slice(6);
+          if (payload === '[DONE]') continue;
+
+          let json;
+          try { json = JSON.parse(payload); } catch { continue; }
+
+          const choice = json.choices?.[0];
+          if (!choice) continue;
+
+          const delta = choice.delta || {};
+
+          if (delta.content) {
+            roundContent += delta.content;
+            send({ type: 'token', content: delta.content });
+          }
+
+          if (delta.tool_calls) {
+            for (const tc of delta.tool_calls) {
+              const idx = tc.index ?? 0;
+              if (!toolCallChunks[idx]) {
+                toolCallChunks[idx] = { id: tc.id || '', name: '', arguments: '' };
+              }
+              if (tc.id) toolCallChunks[idx].id = tc.id;
+              if (tc.function?.name) toolCallChunks[idx].name = tc.function.name;
+              if (tc.function?.arguments) toolCallChunks[idx].arguments += tc.function.arguments;
+            }
+          }
+        }
+      }
+
+      const hasToolCalls = Object.keys(toolCallChunks).length > 0;
+
+      if (hasToolCalls && toolRounds < 3) {
+        toolRounds++;
+        const assistantMsg = { role: 'assistant', content: roundContent || null, tool_calls: [] };
+        for (const idx of Object.keys(toolCallChunks).sort()) {
+          const tc = toolCallChunks[idx];
+          assistantMsg.tool_calls.push({
+            id: tc.id, type: 'function',
+            function: { name: tc.name, arguments: tc.arguments },
+          });
+        }
+        apiMessages.push(assistantMsg);
+
+        for (const tc of assistantMsg.tool_calls) {
+          let toolResult = '未知工具';
+          if (tc.function.name === 'save_memory') {
+            try {
+              const args = JSON.parse(tc.function.arguments);
+              const result = await callOmbreTool('hold', { content: args.content });
+              toolResult = result || '记忆已保存';
+              console.log('Stream: model saved memory:', args.content.substring(0, 80));
+            } catch (e) {
+              toolResult = '保存失败: ' + e.message;
+            }
+          }
+          apiMessages.push({ role: 'tool', tool_call_id: tc.id, content: toolResult });
+        }
+
+        await streamRound();
+        return;
+      }
+
+      fullContent += roundContent;
+    }
+
+    await streamRound();
+
+    if (!fullContent) {
+      send({ type: 'error', error: 'No response from model' });
+      return res.end();
+    }
+
+    const parts = fullContent.split('---SPLIT---').map(p => p.trim()).filter(Boolean);
+    const savedMessages = [];
+    for (const part of parts) {
+      const { data: saved, error: saveErr } = await supabase
+        .from('messages')
+        .insert({ session_id: sessionId, role: 'assistant', content: part })
+        .select().single();
+      if (saveErr) throw saveErr;
+      savedMessages.push(saved);
+    }
+
+    await supabase.from('sessions')
+      .update({ updated_at: new Date().toISOString() })
+      .eq('id', sessionId);
+
+    const { count } = await supabase
+      .from('messages').select('*', { count: 'exact', head: true })
+      .eq('session_id', sessionId).eq('visible', true);
+
+    if (count >= settings.compress_threshold) {
+      compress(sessionId, settings).catch(err => console.error('Compression failed:', err.message));
+    }
+
+    send({ type: 'done', messages: savedMessages, sessionId });
+    res.end();
+  } catch (err) {
+    send({ type: 'error', error: err.message });
+    res.end();
+  }
+});
+
 // Core chat endpoint
 app.post('/api/chat', async (req, res) => {
   try {

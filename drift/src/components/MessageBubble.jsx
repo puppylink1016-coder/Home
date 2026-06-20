@@ -40,7 +40,8 @@ export default function MessageBubble({ message }) {
           className="message-text"
           dangerouslySetInnerHTML={{ __html: formatContent(message.content) }}
         />
-        <div className="message-time">{formatTime(message.created_at)}</div>
+        {message.streaming && <span className="typing-cursor" />}
+        {!message.streaming && <div className="message-time">{formatTime(message.created_at)}</div>}
       </div>
       {isUser && (
         <div className="avatar avatar-user">

@@ -48,6 +48,45 @@ export function sendMessage(message, sessionId) {
   });
 }
 
+export function sendMessageStream(message, sessionId, { onToken, onSession, onDone, onError }) {
+  const headers = { 'Content-Type': 'application/json' };
+  if (AUTH_TOKEN) headers['Authorization'] = `Bearer ${AUTH_TOKEN}`;
+
+  fetch(`${API_URL}/api/chat/stream`, {
+    method: 'POST',
+    headers,
+    body: JSON.stringify({ message, sessionId }),
+  }).then(async (response) => {
+    if (!response.ok) {
+      throw new Error(`HTTP ${response.status}`);
+    }
+    const reader = response.body.getReader();
+    const decoder = new TextDecoder();
+    let buffer = '';
+
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+
+      buffer += decoder.decode(value, { stream: true });
+      const lines = buffer.split('\n');
+      buffer = lines.pop();
+
+      for (const line of lines) {
+        const trimmed = line.trim();
+        if (!trimmed || !trimmed.startsWith('data: ')) continue;
+        let data;
+        try { data = JSON.parse(trimmed.slice(6)); } catch { continue; }
+
+        if (data.type === 'token') onToken?.(data.content);
+        else if (data.type === 'session') onSession?.(data.sessionId);
+        else if (data.type === 'done') onDone?.(data);
+        else if (data.type === 'error') onError?.(new Error(data.error));
+      }
+    }
+  }).catch((err) => onError?.(err));
+}
+
 export function getSettings() {
   return fetchWithAuth(`${API_URL}/api/settings`);
 }

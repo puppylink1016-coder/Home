@@ -52,34 +52,61 @@ function App() {
     setMessages((prev) => [...prev, userMsg]);
     setLoading(true);
 
-    api.sendMessage(text, currentSessionId).then((data) => {
-      const aiMessages = data.messages || (data.message ? [data.message] : []);
-      if (aiMessages.length > 0) {
-        setMessages((prev) => [
-          ...prev,
-          ...aiMessages.map((m) => ({
-            id: m.id || Date.now() + Math.random(),
+    const streamId = 'stream-' + Date.now();
+    let started = false;
+    let activeSessionId = currentSessionId;
+
+    api.sendMessageStream(text, currentSessionId, {
+      onToken(token) {
+        if (!started) {
+          started = true;
+          setLoading(false);
+          setMessages((prev) => [...prev, {
+            id: streamId,
             role: 'assistant',
-            content: m.content,
-            created_at: m.created_at || new Date().toISOString(),
-          })),
-        ]);
-      }
-      if (data.sessionId && !currentSessionId) {
-        setCurrentSessionId(data.sessionId);
+            content: token,
+            streaming: true,
+          }]);
+        } else {
+          setMessages((prev) => prev.map((m) =>
+            m.id === streamId ? { ...m, content: m.content + token } : m
+          ));
+        }
+      },
+      onSession(id) {
+        activeSessionId = id;
+        setCurrentSessionId(id);
+      },
+      onDone(data) {
+        setLoading(false);
+        const final = (data.messages || []).map((m) => ({
+          id: m.id,
+          role: 'assistant',
+          content: m.content,
+          created_at: m.created_at || new Date().toISOString(),
+        }));
+        setMessages((prev) => {
+          const without = prev.filter((m) => m.id !== streamId);
+          return [...without, ...final];
+        });
+        if (data.sessionId && !currentSessionId) {
+          setCurrentSessionId(data.sessionId);
+        }
         api.getSessions().then((d) => {
           setSessions(Array.isArray(d) ? d : d.sessions || []);
         }).catch(() => {});
-      }
-    }).catch(() => {
-      setMessages((prev) => [...prev, {
-        id: Date.now() + 1,
-        role: 'assistant',
-        content: 'Connection error. Please try again.',
-        created_at: new Date().toISOString(),
-      }]);
-    }).finally(() => {
-      setLoading(false);
+      },
+      onError(err) {
+        setLoading(false);
+        if (!started) {
+          setMessages((prev) => [...prev, {
+            id: Date.now() + 1,
+            role: 'assistant',
+            content: '连接出错了，再试一次。',
+            created_at: new Date().toISOString(),
+          }]);
+        }
+      },
     });
   }, [currentSessionId]);
 

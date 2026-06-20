@@ -414,6 +414,21 @@ body {
   margin-top: 4px;
 }
 
+/* Streaming cursor */
+.typing-cursor {
+  display: inline-block;
+  width: 2px;
+  height: 16px;
+  background: var(--accent);
+  margin-left: 2px;
+  vertical-align: text-bottom;
+  animation: blink 0.8s step-end infinite;
+}
+
+@keyframes blink {
+  50% { opacity: 0; }
+}
+
 /* Loading dots */
 .loading-dots {
   display: flex;
