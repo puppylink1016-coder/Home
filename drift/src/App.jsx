@@ -52,9 +52,9 @@ function App() {
       try {
         const result = await api.uploadImage(imageFile);
         imageUrl = result.url;
-      } catch {
+      } catch (err) {
         setUploading(false);
-        return;
+        throw err;
       }
       setUploading(false);
     }
