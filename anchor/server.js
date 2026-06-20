@@ -19,6 +19,10 @@ const supabase = createClient(
   process.env.SUPABASE_KEY
 );
 
+const supabaseAdmin = process.env.SUPABASE_SERVICE_ROLE_KEY
+  ? createClient(process.env.SUPABASE_URL, process.env.SUPABASE_SERVICE_ROLE_KEY)
+  : supabase;
+
 // --- Ombre Brain MCP Client ---
 const OMBRE_BRAIN_URL = process.env.OMBRE_BRAIN_URL || '';
 let ombreSessionId = null;
@@ -114,9 +118,9 @@ function auth(req, res, next) {
 
 // --- Image Upload ---
 async function ensureBucket() {
-  const { data } = await supabase.storage.getBucket('chat-images');
+  const { data } = await supabaseAdmin.storage.getBucket('chat-images');
   if (!data) {
-    await supabase.storage.createBucket('chat-images', { public: true });
+    await supabaseAdmin.storage.createBucket('chat-images', { public: true });
   }
 }
 ensureBucket().catch(() => {});
@@ -130,13 +134,13 @@ app.post('/api/upload', async (req, res) => {
     const ext = (type || 'image/jpeg').split('/')[1] || 'jpg';
     const filename = `${Date.now()}-${Math.random().toString(36).slice(2)}.${ext}`;
 
-    const { error } = await supabase.storage
+    const { error } = await supabaseAdmin.storage
       .from('chat-images')
       .upload(filename, buffer, { contentType: type || 'image/jpeg' });
 
     if (error) throw error;
 
-    const { data: { publicUrl } } = supabase.storage
+    const { data: { publicUrl } } = supabaseAdmin.storage
       .from('chat-images')
       .getPublicUrl(filename);
 
