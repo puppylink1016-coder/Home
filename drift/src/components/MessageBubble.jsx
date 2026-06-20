@@ -1,5 +1,15 @@
 import { useEffect, useRef } from 'react';
 
+function extractImage(text) {
+  if (!text) return { imageUrl: null, rest: text };
+  const match = text.match(/^!\[image\]\((.*?)\)/);
+  if (!match) return { imageUrl: null, rest: text };
+  return {
+    imageUrl: match[1],
+    rest: text.replace(/^!\[image\]\(.*?\)\n?/, '').trim(),
+  };
+}
+
 function formatContent(text) {
   if (!text) return '';
   return text
@@ -21,6 +31,7 @@ function formatTime(dateStr) {
 export default function MessageBubble({ message }) {
   const ref = useRef(null);
   const isUser = message.role === 'user';
+  const { imageUrl, rest } = extractImage(message.content);
 
   useEffect(() => {
     if (ref.current) {
@@ -30,11 +41,16 @@ export default function MessageBubble({ message }) {
 
   return (
     <div className={`message-row ${isUser ? 'message-row-user' : 'message-row-ai'}`} ref={ref}>
-      <div className={`message-bubble ${isUser ? 'bubble-user' : 'bubble-ai'}`}>
-        <div
-          className="message-text"
-          dangerouslySetInnerHTML={{ __html: formatContent(message.content) }}
-        />
+      <div className={`message-bubble ${isUser ? 'bubble-user' : 'bubble-ai'} ${imageUrl ? 'bubble-has-image' : ''}`}>
+        {imageUrl && (
+          <img className="message-image" src={imageUrl} alt="" loading="lazy" />
+        )}
+        {rest && (
+          <div
+            className="message-text"
+            dangerouslySetInnerHTML={{ __html: formatContent(rest) }}
+          />
+        )}
         {message.streaming && <span className="typing-cursor" />}
         {!message.streaming && <span className="message-time">{formatTime(message.created_at)}</span>}
       </div>
