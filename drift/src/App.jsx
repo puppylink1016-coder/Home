@@ -5,6 +5,11 @@ import Settings from './components/Settings.jsx';
 import Memories from './components/Memories.jsx';
 import * as api from './api.js';
 
+function splitStreamContent(content) {
+  const parts = content.split('---SPLIT---').map(p => p.trim()).filter(Boolean);
+  return parts.length > 0 ? parts : [''];
+}
+
 function App() {
   const [sessions, setSessions] = useState([]);
   const [currentSessionId, setCurrentSessionId] = useState(null);
@@ -76,6 +81,21 @@ function App() {
     const streamPrefix = 'stream-' + Date.now() + '-';
     let started = false;
     let fullContent = '';
+    let thinkingContent = '';
+
+    const renderStreamingMessages = () => {
+      const parts = splitStreamContent(fullContent);
+      setMessages((prev) => {
+        const without = prev.filter((m) => !String(m.id).startsWith(streamPrefix));
+        return [...without, ...parts.map((p, i) => ({
+          id: streamPrefix + i,
+          role: 'assistant',
+          content: p,
+          thinking: i === 0 ? thinkingContent : '',
+          streaming: i === parts.length - 1,
+        }))];
+      });
+    };
 
     api.sendMessageStream(text, currentSessionId, {
       imageUrl,
@@ -86,17 +106,16 @@ function App() {
         }
 
         fullContent += token;
-        const parts = fullContent.split('---SPLIT---').map(p => p.trim()).filter(Boolean);
+        renderStreamingMessages();
+      },
+      onThinking(token) {
+        if (!started) {
+          started = true;
+          setLoading(false);
+        }
 
-        setMessages((prev) => {
-          const without = prev.filter((m) => !String(m.id).startsWith(streamPrefix));
-          return [...without, ...parts.map((p, i) => ({
-            id: streamPrefix + i,
-            role: 'assistant',
-            content: p,
-            streaming: i === parts.length - 1,
-          }))];
-        });
+        thinkingContent += token;
+        renderStreamingMessages();
       },
       onSession(id) {
         setCurrentSessionId(id);

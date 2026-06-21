@@ -687,6 +687,7 @@ app.post('/api/heartbeat/run', async (req, res) => {
 // --- Multimodal helpers ---
 function contentToApiFormat(content) {
   if (!content) return content;
+  content = stripThinkingFromContent(content);
   const imgMatch = content.match(/^!\[image\]\((.*?)\)/);
   if (!imgMatch) return content;
 
@@ -696,6 +697,89 @@ function contentToApiFormat(content) {
   const parts = [{ type: 'image_url', image_url: { url: imageUrl } }];
   if (text) parts.push({ type: 'text', text });
   return parts;
+}
+
+const THINKING_MARKER_RE = /^<!--DRIFT_THINKING\n([\s\S]*?)\n-->\n?/;
+const RESPONSE_SPLIT_INSTRUCTION = `## 回复分气泡规则
+把自然聊天回复拆成多个短气泡时，必须在气泡之间单独插入 ---SPLIT---。
+不要解释这个分隔符，不要把它放在句子里。长段落、转折、换话题、最后一句轻问候，都应该分成不同气泡。`;
+
+function appendResponseInstructions(systemContent = '') {
+  return [systemContent, RESPONSE_SPLIT_INSTRUCTION].filter(Boolean).join('\n\n');
+}
+
+function stripThinkingFromContent(content = '') {
+  return String(content).replace(THINKING_MARKER_RE, '').trim();
+}
+
+function attachThinkingToContent(content, thinking) {
+  const cleanThinking = String(thinking || '').trim();
+  if (!cleanThinking) return content;
+  return `<!--DRIFT_THINKING\n${cleanThinking.replace(/-->/g, '-- >')}\n-->\n${content}`;
+}
+
+function collectText(value) {
+  if (!value) return '';
+  if (typeof value === 'string') return value;
+  if (Array.isArray(value)) return value.map(collectText).filter(Boolean).join('\n');
+  if (typeof value === 'object') {
+    return collectText(value.text || value.content || value.summary || value.reasoning);
+  }
+  return '';
+}
+
+function getThinkingDelta(delta = {}) {
+  return collectText(
+    delta.reasoning ||
+    delta.reasoning_content ||
+    delta.thinking ||
+    delta.thinking_content ||
+    delta.reasoning_details
+  );
+}
+
+function getMessageThinking(message = {}) {
+  return collectText(
+    message.reasoning ||
+    message.reasoning_content ||
+    message.thinking ||
+    message.thinking_content ||
+    message.reasoning_details
+  );
+}
+
+function splitAssistantContent(content) {
+  const clean = stripThinkingFromContent(content || '').replace(/\r\n/g, '\n').trim();
+  if (!clean) return [];
+
+  const delimiterParts = clean.split(/\s*---SPLIT---\s*/).map(p => p.trim()).filter(Boolean);
+  if (delimiterParts.length > 1) return delimiterParts;
+
+  const paragraphParts = clean.split(/\n{2,}/).map(p => p.trim()).filter(Boolean);
+  if (paragraphParts.length > 1) return paragraphParts;
+
+  const lineParts = clean.split('\n').map(p => p.trim()).filter(Boolean);
+  if (lineParts.length >= 3 && lineParts.every(p => p.length <= 140)) return lineParts;
+
+  if (/```|^\s*[-*]\s|^\s*\d+\./m.test(clean)) return [clean];
+
+  const sentenceParts = clean.match(/[^。！？!?]+[。！？!?]+|[^。！？!?]+$/g)
+    ?.map(p => p.trim())
+    .filter(Boolean) || [];
+  if (sentenceParts.length < 4) return [clean];
+
+  const grouped = [];
+  let bucket = '';
+  for (const sentence of sentenceParts) {
+    if (bucket && (bucket.length + sentence.length > 72)) {
+      grouped.push(bucket);
+      bucket = sentence;
+    } else {
+      bucket += sentence;
+    }
+  }
+  if (bucket) grouped.push(bucket);
+  return grouped.length > 1 ? grouped : [clean];
 }
 
 // Test Ombre Brain connection
@@ -908,6 +992,8 @@ app.post('/api/chat/stream', async (req, res) => {
       systemContent += '\n\n## 长期记忆\n' + memories.map(m => m.summary).join('\n');
     }
 
+    systemContent = appendResponseInstructions(systemContent);
+
     const apiMessages = [];
     if (systemContent) apiMessages.push({ role: 'system', content: systemContent });
     const contextMessages = recentMessages.reverse();
@@ -933,6 +1019,7 @@ app.post('/api/chat/stream', async (req, res) => {
 
     let toolRounds = 0;
     let fullContent = '';
+    let fullThinking = '';
 
     async function streamRound() {
       const requestBody = {
@@ -962,6 +1049,7 @@ app.post('/api/chat/stream', async (req, res) => {
       const decoder = new TextDecoder();
       let buffer = '';
       let roundContent = '';
+      let roundThinking = '';
       const toolCallChunks = {};
 
       while (true) {
@@ -991,6 +1079,12 @@ app.post('/api/chat/stream', async (req, res) => {
             send({ type: 'token', content: delta.content });
           }
 
+          const thinkingDelta = getThinkingDelta(delta);
+          if (thinkingDelta) {
+            roundThinking += thinkingDelta;
+            send({ type: 'thinking', content: thinkingDelta });
+          }
+
           if (delta.tool_calls) {
             for (const tc of delta.tool_calls) {
               const idx = tc.index ?? 0;
@@ -1006,6 +1100,7 @@ app.post('/api/chat/stream', async (req, res) => {
       }
 
       const hasToolCalls = Object.keys(toolCallChunks).length > 0;
+      fullThinking += roundThinking;
 
       if (hasToolCalls && toolRounds < 3) {
         toolRounds++;
@@ -1048,12 +1143,16 @@ app.post('/api/chat/stream', async (req, res) => {
       return res.end();
     }
 
-    const parts = fullContent.split('---SPLIT---').map(p => p.trim()).filter(Boolean);
+    const parts = splitAssistantContent(fullContent);
     const savedMessages = [];
     for (const part of parts) {
       const { data: saved, error: saveErr } = await supabase
         .from('messages')
-        .insert({ session_id: sessionId, role: 'assistant', content: part })
+        .insert({
+          session_id: sessionId,
+          role: 'assistant',
+          content: attachThinkingToContent(part, savedMessages.length === 0 ? fullThinking : ''),
+        })
         .select().single();
       if (saveErr) throw saveErr;
       savedMessages.push(saved);
@@ -1154,6 +1253,8 @@ app.post('/api/chat', async (req, res) => {
       systemContent += '\n\n## 长期记忆\n' + memText;
     }
 
+    systemContent = appendResponseInstructions(systemContent);
+
     const apiMessages = [];
     if (systemContent) {
       apiMessages.push({ role: 'system', content: systemContent });
@@ -1162,7 +1263,7 @@ app.post('/api/chat', async (req, res) => {
     // Recent messages are in desc order, reverse them
     const contextMessages = recentMessages.reverse();
     for (const msg of contextMessages) {
-      apiMessages.push({ role: msg.role, content: msg.content });
+      apiMessages.push({ role: msg.role, content: contentToApiFormat(msg.content) });
     }
 
     // Define tools the model can use
@@ -1258,15 +1359,19 @@ app.post('/api/chat', async (req, res) => {
       throw new Error('No response content from model');
     }
 
-    // Split by delimiter for multiple bubbles
-    const parts = rawContent.split('---SPLIT---').map(p => p.trim()).filter(Boolean);
+    const assistantThinking = getMessageThinking(assistantMsg);
+    const parts = splitAssistantContent(rawContent);
 
     // Save all assistant messages
     const savedMessages = [];
     for (const part of parts) {
       const { data: saved, error: saveErr } = await supabase
         .from('messages')
-        .insert({ session_id: sessionId, role: 'assistant', content: part })
+        .insert({
+          session_id: sessionId,
+          role: 'assistant',
+          content: attachThinkingToContent(part, savedMessages.length === 0 ? assistantThinking : ''),
+        })
         .select()
         .single();
 
