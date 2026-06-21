@@ -713,7 +713,12 @@ app.post('/api/murmurs/run', async (req, res) => {
       push: req.body?.push !== false,
       source: req.body?.source || (req.body?.force ? 'manual' : 'heartbeat'),
     });
-    res.json(result);
+    res.json({
+      skipped: result.skipped,
+      reason: result.reason || result.generated?.reason,
+      content: result.murmur?.content || null,
+      pushed: result.push?.sent > 0,
+    });
   } catch (err) {
     res.status(500).json({ error: err.message, hint: dataSetupHint(err) });
   }
@@ -730,7 +735,12 @@ app.post('/api/heartbeat/run', async (req, res) => {
       push: req.body?.push !== false,
       source: 'heartbeat',
     });
-    res.json(result);
+    res.json({
+      skipped: result.skipped,
+      reason: result.reason || result.generated?.reason,
+      content: result.murmur?.content || null,
+      pushed: result.push?.sent > 0,
+    });
   } catch (err) {
     res.status(500).json({ error: err.message, hint: dataSetupHint(err) });
   }
