@@ -78,45 +78,38 @@ function App() {
     let fullContent = '';
     let thinkingContent = '';
 
+    const renderStreamingMessages = () => {
+      const parts = fullContent.split('---SPLIT---').map(p => p.trim()).filter(Boolean);
+      const display = parts.length > 0 ? parts : [''];
+      setMessages((prev) => {
+        const without = prev.filter((m) => !String(m.id).startsWith(streamPrefix));
+        return [...without, ...display.map((p, i) => ({
+          id: streamPrefix + i,
+          role: 'assistant',
+          content: p,
+          thinking: i === 0 ? thinkingContent : '',
+          streaming: i === display.length - 1,
+        }))];
+      });
+    };
+
     api.sendMessageStream(text, currentSessionId, {
       imageUrl,
-      onThinking(chunk) {
-        if (!started) {
-          started = true;
-          setLoading(false);
-        }
-        thinkingContent += chunk;
-        setMessages((prev) => {
-          const without = prev.filter((m) => !String(m.id).startsWith(streamPrefix));
-          return [...without, {
-            id: streamPrefix + '0',
-            role: 'assistant',
-            content: '',
-            thinking: thinkingContent,
-            thinkingActive: true,
-            streaming: true,
-          }];
-        });
-      },
       onToken(token) {
         if (!started) {
           started = true;
           setLoading(false);
         }
-
         fullContent += token;
-        const parts = fullContent.split('---SPLIT---').map(p => p.trim()).filter(Boolean);
-
-        setMessages((prev) => {
-          const without = prev.filter((m) => !String(m.id).startsWith(streamPrefix));
-          return [...without, ...parts.map((p, i) => ({
-            id: streamPrefix + i,
-            role: 'assistant',
-            content: p,
-            thinking: i === 0 ? thinkingContent : undefined,
-            streaming: i === parts.length - 1,
-          }))];
-        });
+        renderStreamingMessages();
+      },
+      onThinking(token) {
+        if (!started) {
+          started = true;
+          setLoading(false);
+        }
+        thinkingContent += token;
+        renderStreamingMessages();
       },
       onSession(id) {
         setCurrentSessionId(id);
