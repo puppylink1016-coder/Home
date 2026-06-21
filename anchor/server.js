@@ -1164,6 +1164,7 @@ app.post('/api/chat/stream', async (req, res) => {
             try {
               const args = JSON.parse(tc.function.arguments);
               const result = await callOmbreTool('hold', { content: args.content });
+              await supabase.from('memories').insert({ summary: `[ombre] ${args.content}` }).catch(() => {});
               toolResult = result || '记忆已保存';
               console.log('Stream: model saved memory:', args.content.substring(0, 80));
             } catch (e) {
@@ -1368,6 +1369,7 @@ app.post('/api/chat', async (req, res) => {
           try {
             const args = JSON.parse(tc.function.arguments);
             const result = await callOmbreTool('hold', { content: args.content });
+            await supabase.from('memories').insert({ summary: `[ombre] ${args.content}` }).catch(() => {});
             toolResult = result || '记忆已保存';
             console.log('Model saved memory:', args.content.substring(0, 80));
           } catch (e) {
