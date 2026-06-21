@@ -1603,6 +1603,7 @@ app.get('/api/memories', async (req, res) => {
     const { data, error } = await supabase
       .from('memories')
       .select('*')
+      .not('summary', 'like', '[ombre]%')
       .order('created_at', { ascending: true });
 
     if (error) throw error;
