@@ -194,3 +194,14 @@ export function unsubscribePush(endpoint) {
     body: JSON.stringify({ endpoint }),
   });
 }
+
+export function getMurmurs(limit = 5) {
+  return fetchWithAuth(`${API_URL}/api/murmurs?limit=${limit}`);
+}
+
+export function runMurmur(options = {}) {
+  return fetchWithAuth(`${API_URL}/api/murmurs/run`, {
+    method: 'POST',
+    body: JSON.stringify(options),
+  });
+}

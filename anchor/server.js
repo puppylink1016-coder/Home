@@ -389,6 +389,353 @@ function splitAssistantContent(content) {
   return grouped.length > 1 ? grouped : [clean];
 }
 
+
+// --- Murmurs / Heartbeat ---
+const MURMUR_DAILY_LIMIT = parseInt(process.env.MURMUR_DAILY_LIMIT || '6', 10);
+const MURMUR_MIN_INTERVAL_MINUTES = parseInt(process.env.MURMUR_MIN_INTERVAL_MINUTES || '90', 10);
+const MURMUR_USER_COOLDOWN_MINUTES = parseInt(process.env.MURMUR_USER_COOLDOWN_MINUTES || '30', 10);
+const MURMUR_QUIET_START = parseInt(process.env.MURMUR_QUIET_START || '1', 10);
+const MURMUR_QUIET_END = parseInt(process.env.MURMUR_QUIET_END || '8', 10);
+const MURMUR_TZ_OFFSET_MINUTES = parseInt(process.env.MURMUR_TZ_OFFSET_MINUTES || '480', 10);
+const HEARTBEAT_SECRET = process.env.HEARTBEAT_SECRET || '';
+
+function dataSetupHint(error) {
+  const msg = error?.message || '';
+  if (/relation .*murmurs.* does not exist/i.test(msg)) {
+    return 'Create the murmurs table from anchor/setup.sql in Supabase SQL Editor.';
+  }
+  if (/relation .*push_logs.* does not exist/i.test(msg)) {
+    return 'Create the push_logs table from anchor/setup.sql in Supabase SQL Editor.';
+  }
+  if (/row-level security|rls/i.test(msg)) {
+    return 'Set SUPABASE_SERVICE_ROLE_KEY on Render for Anchor, or add policies for murmurs and push_logs.';
+  }
+  return pushSetupHint(error);
+}
+
+function getLocalHour(date = new Date()) {
+  const shifted = new Date(date.getTime() + MURMUR_TZ_OFFSET_MINUTES * 60 * 1000);
+  return shifted.getUTCHours();
+}
+
+function getLocalDayRange(date = new Date()) {
+  const shifted = new Date(date.getTime() + MURMUR_TZ_OFFSET_MINUTES * 60 * 1000);
+  const startLocalUtc = Date.UTC(
+    shifted.getUTCFullYear(),
+    shifted.getUTCMonth(),
+    shifted.getUTCDate()
+  );
+  const start = new Date(startLocalUtc - MURMUR_TZ_OFFSET_MINUTES * 60 * 1000);
+  const end = new Date(start.getTime() + 24 * 60 * 60 * 1000);
+  return { start, end };
+}
+
+function isQuietHour(hour) {
+  if (MURMUR_QUIET_START === MURMUR_QUIET_END) return false;
+  if (MURMUR_QUIET_START < MURMUR_QUIET_END) {
+    return hour >= MURMUR_QUIET_START && hour < MURMUR_QUIET_END;
+  }
+  return hour >= MURMUR_QUIET_START || hour < MURMUR_QUIET_END;
+}
+
+function minutesSince(dateStr) {
+  if (!dateStr) return Infinity;
+  return (Date.now() - new Date(dateStr).getTime()) / 60000;
+}
+
+function heartbeatAuthorized(req) {
+  if (!HEARTBEAT_SECRET) return true;
+  const header = req.headers.authorization || '';
+  const bearer = header.startsWith('Bearer ') ? header.slice(7) : '';
+  const token = bearer || req.query?.secret || req.body?.secret;
+  return token === HEARTBEAT_SECRET;
+}
+
+async function getMurmurContext() {
+  const { data: settings } = await supabase
+    .from('settings')
+    .select('*')
+    .eq('id', 1)
+    .maybeSingle();
+
+  const { data: recentMessages } = await supabase
+    .from('messages')
+    .select('role, content, created_at')
+    .eq('visible', true)
+    .order('created_at', { ascending: false })
+    .limit(24);
+
+  const { data: coreMemories } = await supabase
+    .from('memories')
+    .select('summary')
+    .not('summary', 'like', '[ombre]%')
+    .order('created_at', { ascending: false })
+    .limit(12);
+
+  let ombreDream = '';
+  if (OMBRE_BRAIN_URL) {
+    ombreDream = await callOmbreTool('dream', {}).catch(() => '') || '';
+  }
+
+  return {
+    settings: settings || {},
+    recentMessages: (recentMessages || []).reverse(),
+    coreMemories: coreMemories || [],
+    ombreDream,
+  };
+}
+
+async function checkMurmurEligibility(force = false) {
+  if (force) return { ok: true, reason: 'manual force' };
+
+  const hour = getLocalHour();
+  if (isQuietHour(hour)) {
+    return { ok: false, reason: 'quiet hours' };
+  }
+
+  const { start, end } = getLocalDayRange();
+  const { data: today, error: todayErr } = await storageSupabase
+    .from('murmurs')
+    .select('id, created_at, source')
+    .gte('created_at', start.toISOString())
+    .lt('created_at', end.toISOString())
+    .neq('source', 'manual')
+    .order('created_at', { ascending: false });
+  if (todayErr) throw todayErr;
+
+  if ((today || []).length >= MURMUR_DAILY_LIMIT) {
+    return { ok: false, reason: 'daily limit reached' };
+  }
+
+  const latestMurmur = today?.[0];
+  if (latestMurmur && minutesSince(latestMurmur.created_at) < MURMUR_MIN_INTERVAL_MINUTES) {
+    return { ok: false, reason: 'too soon since last murmur' };
+  }
+
+  const { data: lastUser, error: userErr } = await supabase
+    .from('messages')
+    .select('created_at')
+    .eq('role', 'user')
+    .order('created_at', { ascending: false })
+    .limit(1)
+    .maybeSingle();
+  if (userErr) throw userErr;
+
+  if (lastUser && minutesSince(lastUser.created_at) < MURMUR_USER_COOLDOWN_MINUTES) {
+    return { ok: false, reason: 'recent user activity' };
+  }
+
+  return { ok: true, reason: 'eligible' };
+}
+
+async function logPush(type, title, body, result) {
+  await storageSupabase
+    .from('push_logs')
+    .insert({
+      type,
+      title,
+      body,
+      endpoint: result.endpoint || null,
+      success: Boolean(result.ok),
+      result,
+    });
+}
+
+async function sendPushToSubscribers(type, title, body, url = '/') {
+  if (!pushConfigured) {
+    return { sent: 0, results: [{ ok: false, error: 'push not configured' }] };
+  }
+
+  const { data, error } = await storageSupabase
+    .from('push_subscriptions')
+    .select('endpoint, subscription')
+    .eq('active', true)
+    .order('updated_at', { ascending: false })
+    .limit(8);
+  if (error) throw error;
+
+  if (!data || data.length === 0) {
+    return { sent: 0, results: [] };
+  }
+
+  const payload = makePushPayload({ title, body, url });
+  const results = await Promise.all(data.map((row) => sendPush(row, payload)));
+  await Promise.all(results.map((result) => logPush(type, title, body, result).catch(() => {})));
+
+  return {
+    sent: results.filter((r) => r.ok).length,
+    results,
+  };
+}
+
+function formatMurmurConversation(messages = []) {
+  return messages
+    .map((m) => `${m.role === 'user' ? '昭昭' : '薄聿'}: ${m.content}`)
+    .join('\n');
+}
+
+function parseMurmurJson(raw, force) {
+  const fallback = {
+    action: force ? 'send' : 'skip',
+    thinking: '',
+    content: raw?.trim() || '',
+    reason: force ? 'manual force' : 'model returned plain text',
+  };
+
+  if (!raw || !raw.trim()) return { ...fallback, action: 'skip', content: '' };
+
+  try {
+    const cleaned = raw
+      .trim()
+      .replace(/^```(?:json)?\s*/i, '')
+      .replace(/\s*```$/i, '')
+      .trim();
+    const parsed = JSON.parse(cleaned);
+    return {
+      action: parsed.action === 'send' ? 'send' : 'skip',
+      thinking: String(parsed.thinking || '').slice(0, 800),
+      content: String(parsed.content || '').trim().slice(0, 220),
+      reason: String(parsed.reason || '').slice(0, 300),
+    };
+  } catch {
+    return fallback;
+  }
+}
+
+async function generateMurmurClean(force = false) {
+  const context = await getMurmurContext();
+  const model = context.settings.model || 'anthropic/claude-sonnet-4-6';
+  const temperature = context.settings.temperature ?? 0.85;
+
+  const coreText = context.coreMemories.map((m) => m.summary).join('\n');
+  const recentText = formatMurmurConversation(context.recentMessages);
+  const nowText = new Date().toLocaleString('zh-CN', { timeZone: 'Asia/Shanghai' });
+
+  const prompt = `现在是 ${nowText}。你是薄聿。请判断要不要给昭昭发一条主动碎碎念。
+规则：
+- 每天最多 ${MURMUR_DAILY_LIMIT} 条，语气要像自然想起她，不像定时任务。
+- 不要重复吃饭、喝水、睡觉、想你等同一主题。
+- 如果最近上下文不适合打扰，action 写 "skip"。
+- 如果适合，action 写 "send"，content 写 12-45 个中文字符。
+- content 是直接推送给昭昭看的，不要解释系统规则。
+- thinking 只写一句内部理由，不超过 80 字。
+${force ? '这次是昭昭手动测试，可以倾向发送一条。' : '这次是后台心跳检查，可以选择不发送。'}
+
+最近对话：
+${recentText || '无'}
+
+核心记忆：
+${coreText || '无'}
+
+Ombre 近期浮现：
+${context.ombreDream || '无'}
+
+只输出 JSON：{"action":"send|skip","thinking":"...","content":"...","reason":"..."}`;
+
+  const response = await fetch('https://openrouter.ai/api/v1/chat/completions', {
+    method: 'POST',
+    headers: {
+      'Authorization': `Bearer ${process.env.OPENROUTER_API_KEY}`,
+      'Content-Type': 'application/json'
+    },
+    body: JSON.stringify({
+      model,
+      messages: [
+        { role: 'system', content: '你只输出有效 JSON，不要使用 Markdown。' },
+        { role: 'user', content: prompt },
+      ],
+      temperature,
+      max_tokens: 420,
+    })
+  });
+
+  const data = await response.json();
+  if (!response.ok) {
+    throw new Error(data.error?.message || `OpenRouter returned ${response.status}`);
+  }
+
+  return parseMurmurJson(data.choices?.[0]?.message?.content || '', force);
+}
+
+async function runMurmurClean({ force = false, push = true, source = 'heartbeat' } = {}) {
+  const eligibility = await checkMurmurEligibility(force);
+  if (!eligibility.ok) {
+    return { skipped: true, reason: eligibility.reason };
+  }
+
+  const generated = await generateMurmurClean(force);
+  if (generated.action !== 'send' || !generated.content) {
+    return { skipped: true, reason: generated.reason || 'model skipped', generated };
+  }
+
+  let pushResult = { sent: 0, results: [] };
+  if (push) {
+    pushResult = await sendPushToSubscribers('murmur', '薄聿', generated.content, '/');
+  }
+
+  const { data: saved, error } = await storageSupabase
+    .from('murmurs')
+    .insert({
+      content: generated.content,
+      thinking: generated.thinking,
+      reason: generated.reason || eligibility.reason,
+      source,
+      pushed: pushResult.sent > 0,
+      push_result: pushResult,
+    })
+    .select()
+    .single();
+  if (error) throw error;
+
+  return { skipped: false, murmur: saved, push: pushResult, generated };
+}
+
+app.get('/api/murmurs', async (req, res) => {
+  try {
+    const limit = Math.min(parseInt(req.query.limit || '20', 10), 100);
+    const { data, error } = await storageSupabase
+      .from('murmurs')
+      .select('*')
+      .order('created_at', { ascending: false })
+      .limit(limit);
+
+    if (error) throw error;
+    res.json(data || []);
+  } catch (err) {
+    res.status(500).json({ error: err.message, hint: dataSetupHint(err) });
+  }
+});
+
+app.post('/api/murmurs/run', async (req, res) => {
+  try {
+    const result = await runMurmurClean({
+      force: Boolean(req.body?.force),
+      push: req.body?.push !== false,
+      source: req.body?.source || (req.body?.force ? 'manual' : 'heartbeat'),
+    });
+    res.json(result);
+  } catch (err) {
+    res.status(500).json({ error: err.message, hint: dataSetupHint(err) });
+  }
+});
+
+app.post('/api/heartbeat/run', async (req, res) => {
+  try {
+    if (!heartbeatAuthorized(req)) {
+      return res.status(401).json({ error: 'Unauthorized' });
+    }
+
+    const result = await runMurmurClean({
+      force: false,
+      push: req.body?.push !== false,
+      source: 'heartbeat',
+    });
+    res.json(result);
+  } catch (err) {
+    res.status(500).json({ error: err.message, hint: dataSetupHint(err) });
+  }
+});
+
 // --- Multimodal helpers ---
 function contentToApiFormat(content) {
   if (!content) return content;

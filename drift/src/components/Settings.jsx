@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useEffect, useState } from 'react';
 import * as api from '../api.js';
 
 function urlBase64ToUint8Array(base64String) {
@@ -17,6 +17,16 @@ function pushSupported() {
   return 'serviceWorker' in navigator && 'PushManager' in window && 'Notification' in window;
 }
 
+function formatMurmurTime(value) {
+  if (!value) return '';
+  return new Date(value).toLocaleString('zh-CN', {
+    month: '2-digit',
+    day: '2-digit',
+    hour: '2-digit',
+    minute: '2-digit',
+  });
+}
+
 export default function Settings({ settings, onSave, onClose }) {
   const [form, setForm] = useState({
     system_prompt: '',
@@ -33,6 +43,19 @@ export default function Settings({ settings, onSave, onClose }) {
     endpoint: '',
     message: '',
   });
+  const [murmurBusy, setMurmurBusy] = useState(false);
+  const [murmurStatus, setMurmurStatus] = useState('');
+  const [murmurs, setMurmurs] = useState([]);
+
+  const loadMurmurs = async ({ silent = false } = {}) => {
+    try {
+      const data = await api.getMurmurs(5);
+      setMurmurs(Array.isArray(data) ? data : []);
+      if (!silent) setMurmurStatus('');
+    } catch (err) {
+      if (!silent) setMurmurStatus(err?.message || '读取失败。');
+    }
+  };
 
   useEffect(() => {
     if (settings) {
@@ -81,6 +104,10 @@ export default function Settings({ settings, onSave, onClose }) {
     });
 
     return () => { active = false; };
+  }, []);
+
+  useEffect(() => {
+    loadMurmurs({ silent: true });
   }, []);
 
   const handleChange = (field, value) => {
@@ -184,6 +211,27 @@ export default function Settings({ settings, onSave, onClose }) {
     }
   };
 
+  const handleRunMurmur = async () => {
+    setMurmurBusy(true);
+    setMurmurStatus('');
+
+    try {
+      const result = await api.runMurmur({ force: true, push: true, source: 'manual' });
+      if (result.skipped) {
+        setMurmurStatus(`这次没发：${result.reason || '模型选择跳过'}`);
+      } else if (result.push?.sent > 0) {
+        setMurmurStatus('已发到手机。');
+      } else {
+        setMurmurStatus('已生成，但没有可用通知订阅。');
+      }
+      await loadMurmurs({ silent: true });
+    } catch (err) {
+      setMurmurStatus(err?.message || '触发失败。');
+    } finally {
+      setMurmurBusy(false);
+    }
+  };
+
   return (
     <div className="settings-overlay" onClick={onClose}>
       <div className="settings-modal" onClick={(e) => e.stopPropagation()}>
@@ -279,6 +327,41 @@ export default function Settings({ settings, onSave, onClose }) {
             <div className={`push-status ${pushStatus.message && !pushStatus.subscribed ? 'push-status-warn' : ''}`}>
               {pushBusy ? 'Working...' : (pushStatus.message || (pushStatus.subscribed ? 'Ready.' : 'Off.'))}
             </div>
+          </div>
+          <div className="field-group murmur-settings">
+            <label>主动碎碎念</label>
+            <div className="push-row">
+              <button
+                className="save-btn"
+                onClick={handleRunMurmur}
+                disabled={murmurBusy}
+              >
+                现在试一次
+              </button>
+              <button
+                className="secondary-btn"
+                onClick={() => loadMurmurs()}
+                disabled={murmurBusy}
+              >
+                刷新
+              </button>
+            </div>
+            <div className={`push-status ${murmurStatus.includes('失败') || murmurStatus.includes('没有') ? 'push-status-warn' : ''}`}>
+              {murmurBusy ? 'Thinking...' : (murmurStatus || 'Ready.')}
+            </div>
+            {murmurs.length > 0 && (
+              <div className="murmur-list">
+                {murmurs.map((murmur) => (
+                  <div className="murmur-item" key={murmur.id}>
+                    <div className="murmur-content">{murmur.content}</div>
+                    <div className="murmur-meta">
+                      {formatMurmurTime(murmur.created_at)}
+                      {murmur.pushed ? ' · pushed' : ''}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
           </div>
         </div>
         <div className="settings-footer">
