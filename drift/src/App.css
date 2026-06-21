@@ -500,6 +500,11 @@ body {
 }
 
 /* Thinking block */
+.message-row-thinking {
+  flex-direction: column;
+  align-items: flex-start;
+}
+
 .thinking-wrapper {
   max-width: 85%;
   margin-bottom: 4px;

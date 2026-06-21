@@ -554,7 +554,8 @@ app.post('/api/chat/stream', async (req, res) => {
       ombreMemories = await callOmbreTool('breath', { query: message });
     }
 
-    let systemContent = settings.system_prompt || '';
+    const thinkingInstruction = '在每次回复的最开头，用[THINKING]和[/THINKING]包裹你的内心独白，必须使用中文，以第一人称视角。[/THINKING]之后写正式回复。正式回复中，在自然段落之间用---SPLIT---分割。';
+    let systemContent = thinkingInstruction + '\n\n' + (settings.system_prompt || '');
     if (ombreMemories) {
       systemContent += '\n\n## 相关记忆（语义检索）\n' + ombreMemories;
     }
@@ -598,11 +599,6 @@ app.post('/api/chat/stream', async (req, res) => {
         stream: true,
       };
 
-      if (settings.model?.includes('claude')) {
-        requestBody.reasoning = { effort: 'high' };
-        requestBody.temperature = 1;
-      }
-
       if (tools.length > 0) requestBody.tools = tools;
 
       const response = await fetch('https://openrouter.ai/api/v1/chat/completions', {
@@ -626,6 +622,59 @@ app.post('/api/chat/stream', async (req, res) => {
       let roundThinking = '';
       const toolCallChunks = {};
 
+      let contentPhase = 'detect';
+      let phaseBuffer = '';
+      const THINK_OPEN = '[THINKING]';
+      const THINK_CLOSE = '[/THINKING]';
+
+      function flushPhase() {
+        if (contentPhase === 'detect') {
+          if (phaseBuffer.length >= THINK_OPEN.length) {
+            if (phaseBuffer.startsWith(THINK_OPEN)) {
+              contentPhase = 'thinking';
+              phaseBuffer = phaseBuffer.slice(THINK_OPEN.length);
+            } else {
+              contentPhase = 'content';
+              roundContent += phaseBuffer;
+              send({ type: 'token', content: phaseBuffer });
+              phaseBuffer = '';
+              return;
+            }
+          } else if (!THINK_OPEN.startsWith(phaseBuffer)) {
+            contentPhase = 'content';
+            roundContent += phaseBuffer;
+            send({ type: 'token', content: phaseBuffer });
+            phaseBuffer = '';
+            return;
+          } else {
+            return;
+          }
+        }
+        if (contentPhase === 'thinking') {
+          const endIdx = phaseBuffer.indexOf(THINK_CLOSE);
+          if (endIdx !== -1) {
+            const text = phaseBuffer.slice(0, endIdx);
+            if (text) { roundThinking += text; send({ type: 'thinking', content: text }); }
+            contentPhase = 'content';
+            let rest = phaseBuffer.slice(endIdx + THINK_CLOSE.length);
+            if (rest.startsWith('\n')) rest = rest.slice(1);
+            phaseBuffer = '';
+            if (rest) { roundContent += rest; send({ type: 'token', content: rest }); }
+          } else {
+            let safe = phaseBuffer.length;
+            for (let i = 1; i < THINK_CLOSE.length; i++) {
+              if (phaseBuffer.endsWith(THINK_CLOSE.slice(0, i))) { safe = phaseBuffer.length - i; break; }
+            }
+            if (safe > 0) {
+              const text = phaseBuffer.slice(0, safe);
+              roundThinking += text;
+              send({ type: 'thinking', content: text });
+              phaseBuffer = phaseBuffer.slice(safe);
+            }
+          }
+        }
+      }
+
       while (true) {
         const { done, value } = await reader.read();
         if (done) break;
@@ -648,22 +697,14 @@ app.post('/api/chat/stream', async (req, res) => {
 
           const delta = choice.delta || {};
 
-          if (Array.isArray(delta.reasoning_details)) {
-            for (const detail of delta.reasoning_details) {
-              if (detail.text) {
-                roundThinking += detail.text;
-                send({ type: 'thinking', content: detail.text });
-              }
-            }
-          } else if (delta.reasoning_content || delta.reasoning) {
-            const chunk = delta.reasoning_content || delta.reasoning;
-            roundThinking += chunk;
-            send({ type: 'thinking', content: chunk });
-          }
-
           if (delta.content) {
-            roundContent += delta.content;
-            send({ type: 'token', content: delta.content });
+            if (contentPhase === 'content') {
+              roundContent += delta.content;
+              send({ type: 'token', content: delta.content });
+            } else {
+              phaseBuffer += delta.content;
+              flushPhase();
+            }
           }
 
           if (delta.tool_calls) {
@@ -678,6 +719,17 @@ app.post('/api/chat/stream', async (req, res) => {
             }
           }
         }
+      }
+
+      if (phaseBuffer) {
+        if (contentPhase === 'thinking') {
+          roundThinking += phaseBuffer;
+          send({ type: 'thinking', content: phaseBuffer });
+        } else {
+          roundContent += phaseBuffer;
+          send({ type: 'token', content: phaseBuffer });
+        }
+        phaseBuffer = '';
       }
 
       const hasToolCalls = Object.keys(toolCallChunks).length > 0;

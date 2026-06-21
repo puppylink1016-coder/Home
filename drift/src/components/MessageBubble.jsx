@@ -54,7 +54,7 @@ function ThinkingBlock({ content, active }) {
           <circle cx="12" cy="12" r="10" />
           <path d="M12 6v6l4 2" />
         </svg>
-        <span>{active ? 'Thinking…' : 'Thought process'}</span>
+        <span>{active ? '思考中…' : '思考过程'}</span>
         <svg className={`thinking-arrow ${expanded ? 'arrow-up' : ''}`} width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
           <path d="M6 9l6 6 6-6" />
         </svg>
@@ -84,7 +84,7 @@ export default function MessageBubble({ message }) {
   }, []);
 
   return (
-    <div className={`message-row ${isUser ? 'message-row-user' : 'message-row-ai'}`} ref={ref}>
+    <div className={`message-row ${isUser ? 'message-row-user' : 'message-row-ai'} ${thinking ? 'message-row-thinking' : ''}`} ref={ref}>
       {thinking && (
         <div className="thinking-wrapper">
           <ThinkingBlock content={thinking} active={!!message.thinkingActive} />
