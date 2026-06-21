@@ -77,19 +77,22 @@ function App() {
     let started = false;
     let fullContent = '';
     let thinkingContent = '';
+    let rafId = 0;
 
-    const renderStreamingMessages = () => {
-      const parts = fullContent.split('---SPLIT---').map(p => p.trim()).filter(Boolean);
-      const display = parts.length > 0 ? parts : [''];
-      setMessages((prev) => {
-        const without = prev.filter((m) => !String(m.id).startsWith(streamPrefix));
-        return [...without, ...display.map((p, i) => ({
-          id: streamPrefix + i,
-          role: 'assistant',
-          content: p,
-          thinking: i === 0 ? thinkingContent : '',
-          streaming: i === display.length - 1,
-        }))];
+    const scheduleRender = () => {
+      if (rafId) return;
+      rafId = requestAnimationFrame(() => {
+        rafId = 0;
+        setMessages((prev) => {
+          const without = prev.filter((m) => !String(m.id).startsWith(streamPrefix));
+          return [...without, {
+            id: streamPrefix + '0',
+            role: 'assistant',
+            content: fullContent,
+            thinking: thinkingContent,
+            streaming: true,
+          }];
+        });
       });
     };
 
@@ -101,7 +104,7 @@ function App() {
           setLoading(false);
         }
         fullContent += token;
-        renderStreamingMessages();
+        scheduleRender();
       },
       onThinking(token) {
         if (!started) {
@@ -109,17 +112,19 @@ function App() {
           setLoading(false);
         }
         thinkingContent += token;
-        renderStreamingMessages();
+        scheduleRender();
       },
       onSession(id) {
         setCurrentSessionId(id);
       },
       onDone(data) {
+        if (rafId) { cancelAnimationFrame(rafId); rafId = 0; }
         setLoading(false);
-        const final = (data.messages || []).map((m) => ({
+        const final = (data.messages || []).map((m, i) => ({
           id: m.id,
           role: 'assistant',
           content: m.content,
+          thinking: i === 0 ? thinkingContent : '',
           created_at: m.created_at || new Date().toISOString(),
         }));
         setMessages((prev) => {
