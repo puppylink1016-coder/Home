@@ -648,10 +648,17 @@ app.post('/api/chat/stream', async (req, res) => {
 
           const delta = choice.delta || {};
 
-          const thinkingChunk = delta.reasoning_content || delta.reasoning;
-          if (thinkingChunk) {
-            roundThinking += thinkingChunk;
-            send({ type: 'thinking', content: thinkingChunk });
+          if (Array.isArray(delta.reasoning_details)) {
+            for (const detail of delta.reasoning_details) {
+              if (detail.text) {
+                roundThinking += detail.text;
+                send({ type: 'thinking', content: detail.text });
+              }
+            }
+          } else if (delta.reasoning_content || delta.reasoning) {
+            const chunk = delta.reasoning_content || delta.reasoning;
+            roundThinking += chunk;
+            send({ type: 'thinking', content: chunk });
           }
 
           if (delta.content) {
