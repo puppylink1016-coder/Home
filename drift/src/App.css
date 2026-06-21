@@ -866,6 +866,38 @@ body {
   color: #9c3535;
 }
 
+.murmur-settings {
+  border-top: 1px solid var(--border);
+  padding-top: 14px;
+}
+
+.murmur-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-top: 4px;
+}
+
+.murmur-item {
+  background: #f4f8fb;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 9px 10px;
+}
+
+.murmur-content {
+  color: var(--text);
+  font-size: 13px;
+  line-height: 1.45;
+  word-break: break-word;
+}
+
+.murmur-meta {
+  margin-top: 4px;
+  color: var(--text-muted);
+  font-size: 11px;
+}
+
 /* Memory tabs */
 .mem-tabs {
   display: flex;

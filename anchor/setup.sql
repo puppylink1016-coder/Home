@@ -42,4 +42,27 @@ CREATE TABLE IF NOT EXISTS push_subscriptions (
   updated_at TIMESTAMPTZ DEFAULT now()
 );
 
-INSERT INTO settings (system_prompt) VALUES ('');
+CREATE TABLE IF NOT EXISTS murmurs (
+  id UUID DEFAULT gen_random_uuid() PRIMARY KEY,
+  content TEXT NOT NULL,
+  thinking TEXT,
+  reason TEXT,
+  source TEXT DEFAULT 'heartbeat',
+  pushed BOOLEAN DEFAULT false,
+  push_result JSONB,
+  created_at TIMESTAMPTZ DEFAULT now()
+);
+
+CREATE TABLE IF NOT EXISTS push_logs (
+  id UUID DEFAULT gen_random_uuid() PRIMARY KEY,
+  type TEXT NOT NULL,
+  title TEXT,
+  body TEXT,
+  endpoint TEXT,
+  success BOOLEAN DEFAULT false,
+  result JSONB,
+  created_at TIMESTAMPTZ DEFAULT now()
+);
+
+INSERT INTO settings (id, system_prompt) VALUES (1, '')
+ON CONFLICT (id) DO NOTHING;
