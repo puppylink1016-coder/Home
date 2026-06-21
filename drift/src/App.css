@@ -359,6 +359,67 @@ body {
   align-self: flex-start;
 }
 
+.message-stack {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 6px;
+  max-width: 100%;
+}
+
+.message-row-user .message-stack {
+  align-items: flex-end;
+}
+
+.thinking-panel {
+  width: fit-content;
+  max-width: min(100%, 520px);
+  background: rgba(224, 238, 248, 0.78);
+  border: 1px solid rgba(126, 172, 196, 0.18);
+  border-radius: 12px;
+  color: #6d7f8d;
+  padding: 8px 10px;
+  box-shadow: 0 1px 2px rgba(80, 110, 130, 0.04);
+}
+
+.thinking-title {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  cursor: pointer;
+  list-style: none;
+  color: #778a99;
+  font-size: 12.5px;
+  font-weight: 600;
+}
+
+.thinking-title::-webkit-details-marker {
+  display: none;
+}
+
+.thinking-title::after {
+  content: "v";
+  margin-left: auto;
+  font-size: 13px;
+  line-height: 1;
+}
+
+.thinking-panel[open] .thinking-title::after {
+  content: "^";
+}
+
+.thinking-icon {
+  display: inline-flex;
+  color: #8aa2b1;
+}
+
+.thinking-text {
+  margin-top: 8px;
+  font-size: 12.5px;
+  line-height: 1.55;
+  word-break: break-word;
+}
+
 /* Avatar */
 .avatar {
   width: 36px;
@@ -499,63 +560,6 @@ body {
   }
 }
 
-/* Thinking block */
-.thinking-wrapper {
-  max-width: 85%;
-  margin-bottom: 4px;
-}
-
-.thinking-block {
-  border-radius: 12px;
-  background: rgba(180, 200, 220, 0.25);
-  overflow: hidden;
-}
-
-.thinking-toggle {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  width: 100%;
-  padding: 6px 12px;
-  border: none;
-  background: none;
-  color: #7a8a9a;
-  font-size: 12px;
-  cursor: pointer;
-  transition: color 0.2s;
-}
-
-.thinking-toggle:hover {
-  color: #4a6a8a;
-}
-
-.thinking-icon {
-  flex-shrink: 0;
-  opacity: 0.7;
-}
-
-.thinking-arrow {
-  margin-left: auto;
-  transition: transform 0.2s;
-}
-
-.thinking-arrow.arrow-up {
-  transform: rotate(180deg);
-}
-
-.thinking-content {
-  padding: 4px 12px 10px;
-  font-size: 12.5px;
-  line-height: 1.5;
-  color: #6a7a8a;
-  border-top: 1px solid rgba(140, 160, 180, 0.15);
-  max-height: 300px;
-  overflow-y: auto;
-}
-
-.thinking-content::-webkit-scrollbar {
-  width: 3px;
-}
 
 .thinking-content::-webkit-scrollbar-thumb {
   background: rgba(140, 160, 180, 0.3);

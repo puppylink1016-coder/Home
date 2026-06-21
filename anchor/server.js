@@ -338,9 +338,61 @@ app.post('/api/push/unsubscribe', async (req, res) => {
   }
 });
 
+// --- Thinking & split helpers ---
+const THINKING_MARKER_RE = /^<!--DRIFT_THINKING\n([\s\S]*?)\n-->\n?/;
+
+const RESPONSE_SPLIT_INSTRUCTION = `## 回复分气泡规则
+把自然聊天回复拆成多个短气泡时，必须在气泡之间单独插入 ---SPLIT---。
+不要解释这个分隔符，不要把它放在句子里。长段落、转折、换话题、最后一句轻问候，都应该分成不同气泡。`;
+
+function stripThinkingFromContent(content = '') {
+  return String(content).replace(THINKING_MARKER_RE, '').trim();
+}
+
+function attachThinkingToContent(content, thinking) {
+  const clean = String(thinking || '').trim();
+  if (!clean) return content;
+  return `<!--DRIFT_THINKING\n${clean.replace(/-->/g, '-- >')}\n-->\n${content}`;
+}
+
+function splitAssistantContent(content) {
+  const clean = stripThinkingFromContent(content || '').replace(/\r\n/g, '\n').trim();
+  if (!clean) return [];
+
+  const delimiterParts = clean.split(/\s*---SPLIT---\s*/).map(p => p.trim()).filter(Boolean);
+  if (delimiterParts.length > 1) return delimiterParts;
+
+  const paragraphParts = clean.split(/\n{2,}/).map(p => p.trim()).filter(Boolean);
+  if (paragraphParts.length > 1) return paragraphParts;
+
+  const lineParts = clean.split('\n').map(p => p.trim()).filter(Boolean);
+  if (lineParts.length >= 3 && lineParts.every(p => p.length <= 140)) return lineParts;
+
+  if (/```|^\s*[-*]\s|^\s*\d+\./m.test(clean)) return [clean];
+
+  const sentenceParts = clean.match(/[^。！？!?]+[。！？!?]+|[^。！？!?]+$/g)
+    ?.map(p => p.trim())
+    .filter(Boolean) || [];
+  if (sentenceParts.length < 4) return [clean];
+
+  const grouped = [];
+  let bucket = '';
+  for (const sentence of sentenceParts) {
+    if (bucket && (bucket.length + sentence.length > 72)) {
+      grouped.push(bucket);
+      bucket = sentence;
+    } else {
+      bucket += sentence;
+    }
+  }
+  if (bucket) grouped.push(bucket);
+  return grouped.length > 1 ? grouped : [clean];
+}
+
 // --- Multimodal helpers ---
 function contentToApiFormat(content) {
   if (!content) return content;
+  content = stripThinkingFromContent(content);
   const imgMatch = content.match(/^!\[image\]\((.*?)\)/);
   if (!imgMatch) return content;
 
@@ -554,7 +606,8 @@ app.post('/api/chat/stream', async (req, res) => {
       ombreMemories = await callOmbreTool('breath', { query: message });
     }
 
-    let systemContent = settings.system_prompt || '';
+    const thinkingInstruction = '在每次回复的最开头，用[THINKING]和[/THINKING]包裹你的内心独白，必须使用中文，以第一人称视角。[/THINKING]之后写正式回复。';
+    let systemContent = [thinkingInstruction, settings.system_prompt || '', RESPONSE_SPLIT_INSTRUCTION].filter(Boolean).join('\n\n');
     if (ombreMemories) {
       systemContent += '\n\n## 相关记忆（语义检索）\n' + ombreMemories;
     }
@@ -598,11 +651,6 @@ app.post('/api/chat/stream', async (req, res) => {
         stream: true,
       };
 
-      if (settings.model?.includes('claude')) {
-        requestBody.reasoning = { effort: 'high' };
-        requestBody.temperature = 1;
-      }
-
       if (tools.length > 0) requestBody.tools = tools;
 
       const response = await fetch('https://openrouter.ai/api/v1/chat/completions', {
@@ -626,6 +674,59 @@ app.post('/api/chat/stream', async (req, res) => {
       let roundThinking = '';
       const toolCallChunks = {};
 
+      let contentPhase = 'detect';
+      let phaseBuffer = '';
+      const THINK_OPEN = '[THINKING]';
+      const THINK_CLOSE = '[/THINKING]';
+
+      function flushPhase() {
+        if (contentPhase === 'detect') {
+          if (phaseBuffer.length >= THINK_OPEN.length) {
+            if (phaseBuffer.startsWith(THINK_OPEN)) {
+              contentPhase = 'thinking';
+              phaseBuffer = phaseBuffer.slice(THINK_OPEN.length);
+            } else {
+              contentPhase = 'content';
+              roundContent += phaseBuffer;
+              send({ type: 'token', content: phaseBuffer });
+              phaseBuffer = '';
+              return;
+            }
+          } else if (!THINK_OPEN.startsWith(phaseBuffer)) {
+            contentPhase = 'content';
+            roundContent += phaseBuffer;
+            send({ type: 'token', content: phaseBuffer });
+            phaseBuffer = '';
+            return;
+          } else {
+            return;
+          }
+        }
+        if (contentPhase === 'thinking') {
+          const endIdx = phaseBuffer.indexOf(THINK_CLOSE);
+          if (endIdx !== -1) {
+            const text = phaseBuffer.slice(0, endIdx);
+            if (text) { roundThinking += text; send({ type: 'thinking', content: text }); }
+            contentPhase = 'content';
+            let rest = phaseBuffer.slice(endIdx + THINK_CLOSE.length);
+            if (rest.startsWith('\n')) rest = rest.slice(1);
+            phaseBuffer = '';
+            if (rest) { roundContent += rest; send({ type: 'token', content: rest }); }
+          } else {
+            let safe = phaseBuffer.length;
+            for (let i = 1; i < THINK_CLOSE.length; i++) {
+              if (phaseBuffer.endsWith(THINK_CLOSE.slice(0, i))) { safe = phaseBuffer.length - i; break; }
+            }
+            if (safe > 0) {
+              const text = phaseBuffer.slice(0, safe);
+              roundThinking += text;
+              send({ type: 'thinking', content: text });
+              phaseBuffer = phaseBuffer.slice(safe);
+            }
+          }
+        }
+      }
+
       while (true) {
         const { done, value } = await reader.read();
         if (done) break;
@@ -648,15 +749,14 @@ app.post('/api/chat/stream', async (req, res) => {
 
           const delta = choice.delta || {};
 
-          const thinkingChunk = delta.reasoning_content || delta.reasoning;
-          if (thinkingChunk) {
-            roundThinking += thinkingChunk;
-            send({ type: 'thinking', content: thinkingChunk });
-          }
-
           if (delta.content) {
-            roundContent += delta.content;
-            send({ type: 'token', content: delta.content });
+            if (contentPhase === 'content') {
+              roundContent += delta.content;
+              send({ type: 'token', content: delta.content });
+            } else {
+              phaseBuffer += delta.content;
+              flushPhase();
+            }
           }
 
           if (delta.tool_calls) {
@@ -671,6 +771,17 @@ app.post('/api/chat/stream', async (req, res) => {
             }
           }
         }
+      }
+
+      if (phaseBuffer) {
+        if (contentPhase === 'thinking') {
+          roundThinking += phaseBuffer;
+          send({ type: 'thinking', content: phaseBuffer });
+        } else {
+          roundContent += phaseBuffer;
+          send({ type: 'token', content: phaseBuffer });
+        }
+        phaseBuffer = '';
       }
 
       const hasToolCalls = Object.keys(toolCallChunks).length > 0;
@@ -717,13 +828,10 @@ app.post('/api/chat/stream', async (req, res) => {
       return res.end();
     }
 
-    const parts = fullContent.split('---SPLIT---').map(p => p.trim()).filter(Boolean);
+    const parts = splitAssistantContent(fullContent);
     const savedMessages = [];
     for (let i = 0; i < parts.length; i++) {
-      let content = parts[i];
-      if (i === 0 && fullThinking) {
-        content = `[THINKING]${fullThinking}[/THINKING]\n${content}`;
-      }
+      const content = attachThinkingToContent(parts[i], i === 0 ? fullThinking : '');
       const { data: saved, error: saveErr } = await supabase
         .from('messages')
         .insert({ session_id: sessionId, role: 'assistant', content })
