@@ -346,7 +346,10 @@ const RESPONSE_SPLIT_INSTRUCTION = `## 回复分气泡规则
 不要解释这个分隔符，不要把它放在句子里。长段落、转折、换话题、最后一句轻问候，都应该分成不同气泡。`;
 
 function stripThinkingFromContent(content = '') {
-  return String(content).replace(THINKING_MARKER_RE, '').trim();
+  return String(content)
+    .replace(THINKING_MARKER_RE, '')
+    .replace(/^\[THINKING\][\s\S]*?\[\/THINKING\]\n?/, '')
+    .trim();
 }
 
 function attachThinkingToContent(content, thinking) {

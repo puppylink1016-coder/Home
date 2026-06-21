@@ -1,14 +1,15 @@
 import { useEffect, useRef } from 'react';
 
 const THINKING_MARKER_RE = /^<!--DRIFT_THINKING\n([\s\S]*?)\n-->\n?/;
+const THINKING_LEGACY_RE = /^\[THINKING\]([\s\S]*?)\[\/THINKING\]\n?/;
 
 function extractThinking(text) {
   if (!text) return { thinking: '', content: text };
-  const match = text.match(THINKING_MARKER_RE);
+  const match = text.match(THINKING_MARKER_RE) || text.match(THINKING_LEGACY_RE);
   if (!match) return { thinking: '', content: text };
   return {
     thinking: match[1].trim(),
-    content: text.replace(THINKING_MARKER_RE, '').trim(),
+    content: text.replace(match[0], '').trim(),
   };
 }
 
