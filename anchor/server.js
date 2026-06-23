@@ -26,6 +26,10 @@ const supabaseAdmin = process.env.SUPABASE_SERVICE_ROLE_KEY
 
 const storageSupabase = supabaseAdmin;
 
+// BLE toy relay queue
+const toyQueue = [];
+const TOY_SECRET = process.env.TOY_SECRET || '';
+
 const VAPID_PUBLIC_KEY = process.env.VAPID_PUBLIC_KEY || '';
 const VAPID_PRIVATE_KEY = process.env.VAPID_PRIVATE_KEY || '';
 const VAPID_SUBJECT = process.env.VAPID_SUBJECT || 'mailto:drift@example.com';
@@ -993,6 +997,26 @@ app.post('/api/chat/stream', async (req, res) => {
       });
     }
 
+    if (TOY_SECRET) {
+      tools.push({
+        type: 'function',
+        function: {
+          name: 'toy_control',
+          description: '控制BLE玩具。speed: 0-1.0 控制强度（吸吮和震动同时响应），pattern: 1-8 选择振动花样（仅震动棒），stop: true 立即停止。sec: 持续秒数（可选）。',
+          parameters: {
+            type: 'object',
+            properties: {
+              speed: { type: 'number', description: '强度 0-1.0' },
+              pattern: { type: 'integer', description: '振动花样 1-8' },
+              level: { type: 'number', description: '花样强度 0-1.0' },
+              stop: { type: 'boolean', description: '立即停止' },
+              sec: { type: 'number', description: '持续秒数' }
+            }
+          }
+        }
+      });
+    }
+
     let toolRounds = 0;
     let fullContent = '';
     let fullThinking = '';
@@ -1165,6 +1189,15 @@ app.post('/api/chat/stream', async (req, res) => {
             } catch (e) {
               toolResult = '保存失败: ' + e.message;
             }
+          } else if (tc.function.name === 'toy_control') {
+            try {
+              const cmd = JSON.parse(tc.function.arguments);
+              toyQueue.push(cmd);
+              toolResult = cmd.stop ? '已停止' : '已发送';
+              console.log('Toy command queued:', JSON.stringify(cmd));
+            } catch (e) {
+              toolResult = '指令解析失败: ' + e.message;
+            }
           }
           apiMessages.push({ role: 'tool', tool_call_id: tc.id, content: toolResult });
         }
@@ -1324,6 +1357,26 @@ app.post('/api/chat', async (req, res) => {
       });
     }
 
+    if (TOY_SECRET) {
+      tools.push({
+        type: 'function',
+        function: {
+          name: 'toy_control',
+          description: '控制BLE玩具。speed: 0-1.0 控制强度（吸吮和震动同时响应），pattern: 1-8 选择振动花样（仅震动棒），stop: true 立即停止。sec: 持续秒数（可选）。',
+          parameters: {
+            type: 'object',
+            properties: {
+              speed: { type: 'number', description: '强度 0-1.0' },
+              pattern: { type: 'integer', description: '振动花样 1-8' },
+              level: { type: 'number', description: '花样强度 0-1.0' },
+              stop: { type: 'boolean', description: '立即停止' },
+              sec: { type: 'number', description: '持续秒数' }
+            }
+          }
+        }
+      });
+    }
+
     // Call OpenRouter
     const requestBody = {
       model: settings.model,
@@ -1369,6 +1422,15 @@ app.post('/api/chat', async (req, res) => {
             console.log('Model saved memory:', args.content.substring(0, 80));
           } catch (e) {
             toolResult = '保存失败: ' + e.message;
+          }
+        } else if (tc.function.name === 'toy_control') {
+          try {
+            const cmd = JSON.parse(tc.function.arguments);
+            toyQueue.push(cmd);
+            toolResult = cmd.stop ? '已停止' : '已发送';
+            console.log('Toy command queued:', JSON.stringify(cmd));
+          } catch (e) {
+            toolResult = '指令解析失败: ' + e.message;
           }
         }
         apiMessages.push({ role: 'tool', tool_call_id: tc.id, content: toolResult });
@@ -1691,6 +1753,24 @@ app.post('/api/ombre/search', async (req, res) => {
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
+});
+
+// --- BLE Toy Relay ---
+app.get('/api/toy-next', (req, res) => {
+  const secret = req.headers['x-bridge-secret'] || req.query.secret || '';
+  if (TOY_SECRET && secret !== TOY_SECRET) return res.status(401).json({});
+  const cmd = toyQueue.shift();
+  res.json(cmd || {});
+});
+
+app.post('/api/toy-cmd', (req, res) => {
+  const secret = req.headers['x-bridge-secret'] || req.query.secret || '';
+  if (TOY_SECRET && secret !== TOY_SECRET) return res.status(401).json({});
+  const cmd = req.body;
+  if (cmd && Object.keys(cmd).length) {
+    toyQueue.push(cmd);
+  }
+  res.json({ ok: true });
 });
 
 app.listen(PORT, () => {

@@ -21,7 +21,7 @@ H = 0x55
 KEEPALIVE_SEC = 1.5
 POLL_SEC = 0.3
 
-BRIDGE_URL = os.environ.get("BRIDGE_URL", "").rstrip("/")
+BRIDGE_URL = os.environ.get("BRIDGE_URL", "https://anchor-uohz.onrender.com").rstrip("/")
 BRIDGE_SECRET = os.environ.get("BRIDGE_SECRET", "")
 
 current_cmd = None
