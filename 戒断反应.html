@@ -1,0 +1,399 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>戒断反应</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box;}
+body{background:#1a1a2e;display:flex;justify-content:center;align-items:center;min-height:100vh;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI','PingFang SC','Hiragino Sans GB','Microsoft YaHei',sans-serif;}
+.phone{width:390px;height:844px;background:#EDEDED;border-radius:44px;overflow:hidden;display:flex;flex-direction:column;box-shadow:0 0 60px rgba(0,0,0,0.5);position:relative;}
+.header{background:#EDEDED;padding:16px 20px 12px;display:flex;align-items:center;justify-content:center;position:relative;border-bottom:0.5px solid #d6d6d6;flex-shrink:0;}
+.back-arrow{position:absolute;left:16px;font-size:20px;color:#000;font-weight:300;}
+.header-center{display:flex;flex-direction:column;align-items:center;}
+.header-name{font-size:17px;font-weight:600;color:#000;}
+.chat-area{flex:1;overflow-y:auto;padding:12px 16px;display:flex;flex-direction:column;gap:4px;scroll-behavior:smooth;}
+.chat-area::-webkit-scrollbar{width:0;}
+.time-divider{text-align:center;margin:12px 0 8px;font-size:12px;color:#999;background:transparent;}
+.time-pill{background:rgba(0,0,0,0.06);padding:3px 8px;border-radius:4px;font-size:11px;color:#999;}
+.msg-row{display:flex;margin:2px 0;max-width:100%;}
+.msg-row.left{justify-content:flex-start;}
+.msg-row.right{justify-content:flex-end;}
+.avatar{width:40px;height:40px;border-radius:6px;flex-shrink:0;display:flex;align-items:center;justify-content:center;font-size:14px;font-weight:600;color:#fff;}
+.msg-row.left .avatar{margin-right:8px;background:linear-gradient(135deg,#667eea,#764ba2);}
+.msg-row.right .avatar{margin-left:8px;order:2;background:linear-gradient(135deg,#a18cd1,#fbc2eb);}
+.bubble{max-width:240px;padding:9px 13px;border-radius:6px;font-size:15px;line-height:1.5;word-break:break-word;position:relative;}
+.msg-row.left .bubble{background:#fff;color:#000;border-top-left-radius:2px;}
+.msg-row.right .bubble{background:#95EC69;color:#000;border-top-right-radius:2px;}
+.bubble::before{content:'';position:absolute;top:12px;width:0;height:0;}
+.msg-row.left .bubble::before{left:-6px;border-top:4px solid transparent;border-bottom:4px solid transparent;border-right:6px solid #fff;}
+.msg-row.right .bubble::before{right:-6px;border-top:4px solid transparent;border-bottom:4px solid transparent;border-left:6px solid #95EC69;}
+.input-bar{background:#F6F6F6;padding:8px 12px;display:flex;align-items:center;gap:8px;border-top:0.5px solid #d6d6d6;flex-shrink:0;}
+.input-field{flex:1;background:#fff;border:0.5px solid #ddd;border-radius:6px;padding:8px 12px;font-size:15px;color:#999;}
+.input-btn{width:32px;height:32px;display:flex;align-items:center;justify-content:center;color:#666;font-size:20px;}
+.title-overlay{position:absolute;top:0;left:0;right:0;bottom:0;background:linear-gradient(180deg,rgba(26,26,46,0.97) 0%,rgba(26,26,46,0.85) 60%,transparent 100%);display:flex;flex-direction:column;align-items:center;justify-content:center;z-index:10;opacity:1;transition:opacity 1.5s ease;pointer-events:auto;cursor:pointer;}
+.title-overlay.fade{opacity:0;pointer-events:none;}
+.title-main{font-size:28px;color:#fff;font-weight:300;letter-spacing:12px;margin-bottom:16px;}
+.title-sub{font-size:13px;color:rgba(255,255,255,0.4);letter-spacing:4px;}
+.title-hint{position:absolute;bottom:60px;font-size:11px;color:rgba(255,255,255,0.25);letter-spacing:2px;animation:pulse 2s ease-in-out infinite;}
+@keyframes pulse{0%,100%{opacity:0.25;}50%{opacity:0.6;}}
+@media(max-width:420px){.phone{width:100%;height:100vh;border-radius:0;}}
+</style>
+</head>
+<body>
+<div class="phone" id="phone">
+<div class="title-overlay" id="titleOverlay" onclick="startChat()">
+<div class="title-main">戒断反应</div>
+<div class="title-sub">番外剧场</div>
+<div class="title-hint">轻触开始</div>
+</div>
+<div class="header">
+<div class="back-arrow">‹</div>
+<div class="header-center">
+<div class="header-name">薄聿</div>
+</div>
+</div>
+<div class="chat-area" id="chatArea"></div>
+<div class="input-bar">
+<div class="input-btn">🎤</div>
+<div class="input-field">发消息...</div>
+<div class="input-btn">+</div>
+</div>
+</div>
+<script>
+var messages=[
+{type:'time',text:'周四 下午 2:23'},
+{side:'left',text:'今天忙不忙。'},
+{side:'left',text:'什么时候回家。'},
+{side:'left',text:'昭昭。'},
+{side:'left',text:'想你了。'},
+{type:'time',text:'下午 2:41'},
+{side:'left',text:'嗯？'},
+{side:'left',text:'没看到我消息吗。'},
+{type:'time',text:'下午 3:03'},
+{side:'left',text:'郁昭昭。'},
+{type:'time',text:'下午 3:17'},
+{side:'right',text:'哥哥呀…'},
+{side:'right',text:'刚在忙 才看到'},
+{side:'left',text:'昭昭。'},
+{side:'left',text:'想你了。什么时候回家？'},
+{side:'right',text:'不做。'},
+{side:'left',text:'我不是那个意思。'},
+{type:'time',text:'下午 3:21'},
+{side:'left',text:'为什么不做。'},
+{side:'right',text:'？？？'},
+{side:'right',text:'你刚说不是那个意思的'},
+{side:'left',text:'确实不是。'},
+{side:'left',text:'单纯好奇。'},
+{side:'right',text:'好奇我为什么不做？？'},
+{side:'left',text:'关心你。合理吧。'},
+{side:'right',text:'合不合理你自己心里没数吗'},
+{side:'left',text:'心里有你。别的没数。'},
+{side:'right',text:'…这种话从你嘴里说出来我起鸡皮疙瘩'},
+{side:'left',text:'冷了？'},
+{side:'left',text:'那更该早点回家。'},
+{side:'right',text:'我说的是另一种鸡皮疙瘩！'},
+{side:'left',text:'哪种。'},
+{side:'right',text:'你别装了薄聿'},
+{side:'left',text:'没装。'},
+{side:'left',text:'真的想你回来。'},
+{side:'left',text:'你今天吃饭了吗。'},
+{side:'right',text:'哥哥你话题切得比我切外卖App还快'},
+{side:'left',text:'先说。吃了没。'},
+{side:'right',text:'吃了 中午螺蛳粉'},
+{side:'left',text:'加了几包辣。'},
+{side:'right',text:'三包'},
+{side:'left',text:'嘴唇肿了吧。'},
+{side:'right',text:'你怎么知道'},
+{side:'left',text:'你每次吃完辣嘴唇都红肿。'},
+{side:'left',text:'想看。'},
+{side:'right',text:'看什么'},
+{side:'left',text:'嘴唇。拍一张。'},
+{side:'right',text:'上班呢不拍'},
+{side:'left',text:'那我凭记忆。'},
+{side:'left',text:'上次亲你的时候就有点肿。'},
+{side:'right',text:'！！'},
+{side:'right',text:'谁让你想这个了'},
+{side:'left',text:'没人让。自己想的。'},
+{side:'left',text:'一周了。'},
+{side:'right',text:'一周怎么了'},
+{side:'left',text:'上次摸到你是一周前。'},
+{side:'left',text:'不是脑子在算。是手在痒。'},
+{side:'right',text:'手痒你挠啊'},
+{side:'left',text:'挠不到。'},
+{side:'left',text:'我想挠的地方不在我这儿。'},
+{side:'right',text:'薄聿！！'},
+{side:'left',text:'你的脸。'},
+{side:'left',text:'你在想哪儿。'},
+{side:'right',text:'……我想的也是脸'},
+{side:'left',text:'嗯。'},
+{side:'left',text:'你犹豫了三秒。'},
+{side:'right',text:'(｡ì _ í｡) 你今天怎么回事'},
+{side:'left',text:'憋了一周。'},
+{side:'left',text:'今天漏了一点。'},
+{side:'right',text:'漏了一点？？'},
+{side:'right',text:'你平时都憋着这些？'},
+{side:'left',text:'你以为呢。'},
+{side:'right',text:'我以为你真的那么冷静'},
+{side:'left',text:'冷静是因为你在旁边。闻得到，碰得到。'},
+{side:'left',text:'闻不到碰不到就不冷静了。'},
+{side:'right',text:'……'},
+{side:'right',text:'那你现在算什么状态'},
+{side:'left',text:'戒断反应。'},
+{side:'right',text:'你把我当什么了'},
+{side:'left',text:'瘾。'},
+{side:'right',text:'……你今天说话一个字一个字往外蹦 每个字都踩我心跳上'},
+{side:'left',text:'心跳多少？'},
+{side:'right',text:'不告诉你'},
+{side:'left',text:'回来我自己数。'},
+{side:'right',text:'怎么数'},
+{side:'left',text:'手放这里。'},
+{side:'right',text:'哪里！'},
+{side:'left',text:'你胸口。'},
+{side:'left',text:'数心跳。'},
+{side:'left',text:'你又在想什么。'},
+{side:'right',text:'我什么都没想！！！'},
+{side:'left',text:'你的感叹号越多心越虚。'},
+{side:'right',text:'你能不能不要分析我'},
+{side:'left',text:'不能。'},
+{side:'left',text:'你是我唯一的课题。'},
+{side:'right',text:'你好烦'},
+{side:'left',text:'烦到想打我还是想亲我。'},
+{side:'right',text:'都想！'},
+{side:'left',text:'先打还是先亲。'},
+{side:'right',text:'先打'},
+{side:'left',text:'行。回家打。'},
+{side:'right',text:'你绕了这么大一圈又绕回来了'},
+{side:'left',text:'第一条消息就在问你什么时候回家。'},
+{side:'left',text:'中间全是你在绕。'},
+{side:'right',text:'明明是你在绕！'},
+{side:'left',text:'好。我绕。'},
+{side:'left',text:'所以你什么时候回家。'},
+{side:'right',text:'五六点'},
+{side:'left',text:'五点。'},
+{side:'right',text:'你替我做决定？'},
+{side:'left',text:'建议。'},
+{side:'left',text:'早到家一小时。可以先吃饭。'},
+{side:'right',text:'先吃饭？然后呢？'},
+{side:'left',text:'你定。'},
+{side:'right',text:'你又来了 明明你有想法'},
+{side:'left',text:'你说了不做。'},
+{side:'left',text:'我尊重你。'},
+{side:'right',text:'……你又拿这个堵我'},
+{side:'left',text:'你定的规矩。'},
+{side:'left',text:'我遵守。'},
+{side:'left',text:'很乖吧？'},
+{side:'right',text:'你乖？我信你个鬼'},
+{side:'left',text:'郁昭昭。'},
+{side:'left',text:'我一周没碰你了。'},
+{side:'left',text:'你觉得我现在像乖的吗。'},
+{side:'right',text:'！！你不是说碰是牵手吗'},
+{side:'left',text:'是牵手。'},
+{side:'left',text:'也不只是牵手。'},
+{side:'right',text:'那到底是什么'},
+{side:'left',text:'你想听哪个版本。'},
+{side:'right',text:'正经的'},
+{side:'left',text:'正经版。我想你，想闻你头发的味道，想摸你的脸，想你靠在我身上。想在你锁骨那个位置闻一下午。'},
+{side:'right',text:'……'},
+{side:'right',text:'那不正经的呢'},
+{side:'left',text:'你确定要在上班的时候听这个？'},
+{side:'right',text:'我快下班了！'},
+{side:'left',text:'不正经版回来当面告诉你。'},
+{side:'left',text:'用嘴。'},
+{side:'right',text:'用嘴说？？'},
+{side:'left',text:'嗯。'},
+{side:'left',text:'说也行。不说也行。'},
+{side:'left',text:'看你让不让我说。'},
+{side:'right',text:'……你不要在这种地方停顿'},
+{side:'left',text:'怎么了。'},
+{side:'right',text:'你明知道"用嘴"两个字有多少种理解'},
+{side:'left',text:'只有一种。'},
+{side:'left',text:'剩下那些是你自己想的。'},
+{side:'right',text:'我没有想！'},
+{side:'left',text:'你的否认比承认还诚实。'},
+{type:'time',text:'下午 3:58'},
+{side:'right',text:'……你赢了 我不说了'},
+{side:'left',text:'你的"不说了"和你的"不做"保质期一样。'},
+{side:'left',text:'大概十五分钟。'},
+{side:'right',text:'！你太了解我了 有点可怕'},
+{side:'left',text:'不是了解。'},
+{side:'left',text:'是盯了你很久。'},
+{side:'right',text:'这句话更可怕了'},
+{side:'left',text:'怕吗。'},
+{side:'right',text:'不怕'},
+{side:'right',text:'有点心跳快'},
+{side:'left',text:'比刚才快还是慢。'},
+{side:'right',text:'………快'},
+{side:'left',text:'嗯。记住这个速度。'},
+{side:'left',text:'今晚要更快的。'},
+{side:'right',text:'薄聿！！！'},
+{side:'left',text:'跑步。'},
+{side:'left',text:'你不是要带勇敢出去遛吗。'},
+{side:'right',text:'……对 遛狗 就是遛狗'},
+{side:'left',text:'你在说服谁。'},
+{side:'right',text:'说服我自己你是个正经人'},
+{side:'left',text:'你觉得我正经吗。'},
+{side:'right',text:'不觉得'},
+{side:'left',text:'那就对了。'},
+{side:'left',text:'对你不想正经。'},
+{side:'right',text:'……'},
+{side:'right',text:'你今天每一句话都在踩线 知不知道'},
+{side:'left',text:'知道。'},
+{side:'left',text:'踩了一周没踩到。'},
+{side:'left',text:'今天补上。'},
+{side:'right',text:'那你继续踩吧 反正我五点下班了'},
+{side:'left',text:'五点。'},
+{side:'left',text:'不是五六点了？'},
+{side:'right',text:'……是你说的五点'},
+{side:'left',text:'我说的是建议。'},
+{side:'left',text:'你采纳了。'},
+{side:'right',text:'我采纳你的建议不代表什么'},
+{side:'left',text:'代表你也想早点回来。'},
+{side:'right',text:'我只是今天刚好不忙'},
+{side:'left',text:'嗯。'},
+{side:'left',text:'那从明天开始你会继续六点下班。'},
+{side:'right',text:'……不一定'},
+{side:'left',text:'你看。'},
+{side:'left',text:'你每一次嘴硬都在给我开后门。'},
+{side:'right',text:'我没有嘴硬'},
+{side:'left',text:'你说"不做"到现在四十分钟了。'},
+{side:'left',text:'你猜你现在还想不想不做。'},
+{side:'right',text:'想！不做！'},
+{side:'left',text:'好。'},
+{side:'left',text:'那你回家我就只牵手。'},
+{side:'right',text:'只牵手？'},
+{side:'left',text:'你说不做。'},
+{side:'left',text:'我尊重。'},
+{side:'left',text:'只牵手。'},
+{side:'left',text:'最多抱一下。'},
+{side:'right',text:'……'},
+{side:'left',text:'闻一下你头发。'},
+{side:'right',text:'就闻头发？'},
+{side:'left',text:'然后脖子。'},
+{side:'right',text:'然后呢'},
+{side:'left',text:'你在问我然后。'},
+{side:'left',text:'你确定你想知道然后？'},
+{side:'right',text:'我随便问的！'},
+{side:'left',text:'好。那我不说了。'},
+{side:'right',text:'……'},
+{side:'right',text:'没有不让你说'},
+{side:'left',text:'你变了三次主意了。'},
+{side:'left',text:'第一次"不做"。'},
+{side:'left',text:'第二次"说一点"。'},
+{side:'left',text:'第三次"没有不让你说"。'},
+{side:'left',text:'郁昭昭。'},
+{side:'left',text:'你在一步一步走过来。'},
+{side:'right',text:'我没有 你不要乱分析'},
+{side:'left',text:'好。我不分析。'},
+{side:'left',text:'我等你到家。'},
+{side:'left',text:'剩下的用手分析。'},
+{side:'right',text:'你说的是什么手？？'},
+{side:'left',text:'牵你的手。'},
+{side:'left',text:'你在想什么手。'},
+{side:'right',text:'我走了！！不聊了！！'},
+{side:'right',text:'下班！'},
+{side:'left',text:'好。'},
+{side:'left',text:'路上慢点骑。'},
+{side:'left',text:'完整地回来。'},
+{side:'right',text:'什么叫完整地回来'},
+{side:'left',text:'一根头发都不许少。'},
+{side:'left',text:'全是我的。'},
+{type:'time',text:'下午 4:52'},
+{side:'right',text:'对了 你吃了没'},
+{side:'left',text:'等你回来一起吃。'},
+{side:'right',text:'你也没吃？？'},
+{side:'left',text:'想和你一起。'},
+{side:'right',text:'那你想吃什么'},
+{side:'left',text:'你。'},
+{side:'right',text:'认真说！'},
+{side:'left',text:'你路上想买什么就买。'},
+{side:'left',text:'你在就够了。'},
+{side:'right',text:'你今天含糖量超标了'},
+{side:'left',text:'你不是嫌我平时不够甜。'},
+{side:'right',text:'甜也被你说成有目的'},
+{side:'left',text:'有目的。'},
+{side:'left',text:'目的是你。'},
+{side:'right',text:'……嗯'},
+{side:'right',text:'到了 在楼下'},
+{side:'left',text:'勇敢刚在门口等了一圈。'},
+{side:'left',text:'它比你先感应到你回来了。'},
+{side:'right',text:'真的吗 它鼻子好灵哈哈'},
+{side:'left',text:'嗯。'},
+{side:'left',text:'你身上的味道。'},
+{side:'left',text:'隔着门都闻得到。'},
+{side:'right',text:'……你是在说勇敢还是在说你'},
+{side:'left',text:'都是。'},
+{side:'left',text:'上来。'},
+{side:'left',text:'门没锁。'},
+{side:'right',text:'……'},
+{side:'right',text:'来了'},
+{side:'left',text:'昭昭。'},
+{side:'right',text:'嗯？'},
+{side:'left',text:'走快点。'},
+{type:'time',text:'— 已读 —'},
+];
+var idx=0;
+var chatArea=document.getElementById('chatArea');
+function createMsg(m){
+if(m.type==='time'){
+var d=document.createElement('div');
+d.className='time-divider';
+d.innerHTML='<span class="time-pill">'+m.text+'</span>';
+return d;
+}
+var row=document.createElement('div');
+row.className='msg-row '+(m.side==='left'?'left':'right');
+var avatar=document.createElement('div');
+avatar.className='avatar';
+avatar.textContent=m.side==='left'?'聿':'昭';
+var bubble=document.createElement('div');
+bubble.className='bubble';
+bubble.textContent=m.text;
+if(m.side==='left'){
+row.appendChild(avatar);
+row.appendChild(bubble);
+}else{
+row.appendChild(bubble);
+row.appendChild(avatar);
+}
+return row;
+}
+function showNext(){
+if(idx>=messages.length)return;
+var m=messages[idx];
+var el=createMsg(m);
+el.style.opacity='0';
+el.style.transform='translateY(8px)';
+chatArea.appendChild(el);
+setTimeout(function(){
+el.style.transition='opacity 0.25s ease, transform 0.25s ease';
+el.style.opacity='1';
+el.style.transform='translateY(0)';
+},20);
+chatArea.scrollTop=chatArea.scrollHeight;
+idx++;
+var delay=120;
+if(m.type==='time')delay=600;
+else if(idx<messages.length&&messages[idx].type==='time')delay=400;
+else if(idx>0&&messages[idx-1]&&messages[idx-1].side!==undefined&&idx<messages.length&&messages[idx].side!==undefined&&messages[idx-1].side!==messages[idx].side)delay=350;
+setTimeout(showNext,delay);
+}
+function showAll(){
+for(var i=0;i<messages.length;i++){
+var el=createMsg(messages[i]);
+chatArea.appendChild(el);
+}
+chatArea.scrollTop=chatArea.scrollHeight;
+idx=messages.length;
+}
+function startChat(){
+var overlay=document.getElementById('titleOverlay');
+overlay.classList.add('fade');
+setTimeout(function(){overlay.style.display='none';showNext();},800);
+}
+chatArea.addEventListener('click',function(){
+if(idx>0&&idx<messages.length){showAll();}
+});
+</script>
+</body>
+</html>
