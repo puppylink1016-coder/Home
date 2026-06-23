@@ -91,7 +91,7 @@ async def bridge_loop():
     headers = {"x-bridge-secret": BRIDGE_SECRET} if BRIDGE_SECRET else {}
     while True:
         try:
-            r = requests.get(f"{BRIDGE_URL}/toy-next", headers=headers, timeout=4)
+            r = requests.get(f"{BRIDGE_URL}/api/toy-next", headers=headers, timeout=4)
             if r.ok:
                 c = r.json()
                 if c and c.get("type") != "hello" and len(c):
