@@ -738,12 +738,7 @@ app.post('/api/heartbeat/run', async (req, res) => {
       push: req.body?.push !== false,
       source: 'heartbeat',
     });
-    res.json({
-      skipped: result.skipped,
-      reason: result.reason || result.generated?.reason,
-      content: result.murmur?.content || null,
-      pushed: result.push?.sent > 0,
-    });
+    res.json({ ok: !result.skipped });
   } catch (err) {
     res.status(500).json({ error: err.message, hint: dataSetupHint(err) });
   }
