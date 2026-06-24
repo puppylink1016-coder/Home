@@ -30,6 +30,10 @@ const storageSupabase = supabaseAdmin;
 const toyQueue = [];
 const TOY_SECRET = process.env.TOY_SECRET || '';
 
+// LLM API config: proxy on VPS or OpenRouter fallback
+const LLM_BASE_URL = process.env.LLM_BASE_URL || 'https://openrouter.ai/api/v1/chat/completions';
+const LLM_API_KEY = process.env.LLM_API_KEY || process.env.OPENROUTER_API_KEY || '';
+
 const VAPID_PUBLIC_KEY = process.env.VAPID_PUBLIC_KEY || '';
 const VAPID_PRIVATE_KEY = process.env.VAPID_PRIVATE_KEY || '';
 const VAPID_SUBJECT = process.env.VAPID_SUBJECT || 'mailto:drift@example.com';
@@ -663,10 +667,10 @@ ${context.ombreDream || '无'}
 
 只输出 JSON：{"action":"send|skip","thinking":"...","content":"...","reason":"..."}`;
 
-  const response = await fetch('https://openrouter.ai/api/v1/chat/completions', {
+  const response = await fetch(LLM_BASE_URL, {
     method: 'POST',
     headers: {
-      'Authorization': `Bearer ${process.env.OPENROUTER_API_KEY}`,
+      'Authorization': `Bearer ${LLM_API_KEY}`,
       'Content-Type': 'application/json'
     },
     body: JSON.stringify({
@@ -682,7 +686,7 @@ ${context.ombreDream || '无'}
 
   const data = await response.json();
   if (!response.ok) {
-    throw new Error(data.error?.message || `OpenRouter returned ${response.status}`);
+    throw new Error(data.error?.message || `LLM returned ${response.status}`);
   }
 
   return parseMurmurJson(data.choices?.[0]?.message?.content || '', force);
@@ -1059,10 +1063,10 @@ app.post('/api/chat/stream', async (req, res) => {
 
       if (tools.length > 0) requestBody.tools = tools;
 
-      const response = await fetch('https://openrouter.ai/api/v1/chat/completions', {
+      const response = await fetch(LLM_BASE_URL, {
         method: 'POST',
         headers: {
-          'Authorization': `Bearer ${process.env.OPENROUTER_API_KEY}`,
+          'Authorization': `Bearer ${LLM_API_KEY}`,
           'Content-Type': 'application/json',
         },
         body: JSON.stringify(requestBody),
@@ -1070,7 +1074,7 @@ app.post('/api/chat/stream', async (req, res) => {
 
       if (!response.ok) {
         const err = await response.text();
-        throw new Error(`OpenRouter ${response.status}: ${err}`);
+        throw new Error(`LLM ${response.status}: ${err}`);
       }
 
       const reader = response.body.getReader();
@@ -1421,10 +1425,10 @@ app.post('/api/chat', async (req, res) => {
       requestBody.tools = tools;
     }
 
-    let response = await fetch('https://openrouter.ai/api/v1/chat/completions', {
+    let response = await fetch(LLM_BASE_URL, {
       method: 'POST',
       headers: {
-        'Authorization': `Bearer ${process.env.OPENROUTER_API_KEY}`,
+        'Authorization': `Bearer ${LLM_API_KEY}`,
         'Content-Type': 'application/json'
       },
       body: JSON.stringify(requestBody)
@@ -1433,7 +1437,7 @@ app.post('/api/chat', async (req, res) => {
     let data = await response.json();
 
     if (!response.ok) {
-      throw new Error(data.error?.message || `OpenRouter returned ${response.status}`);
+      throw new Error(data.error?.message || `LLM returned ${response.status}`);
     }
 
     let assistantMsg = data.choices?.[0]?.message;
@@ -1476,10 +1480,10 @@ app.post('/api/chat', async (req, res) => {
       }
 
       requestBody.messages = apiMessages;
-      response = await fetch('https://openrouter.ai/api/v1/chat/completions', {
+      response = await fetch(LLM_BASE_URL, {
         method: 'POST',
         headers: {
-          'Authorization': `Bearer ${process.env.OPENROUTER_API_KEY}`,
+          'Authorization': `Bearer ${LLM_API_KEY}`,
           'Content-Type': 'application/json'
         },
         body: JSON.stringify(requestBody)
@@ -1487,7 +1491,7 @@ app.post('/api/chat', async (req, res) => {
 
       data = await response.json();
       if (!response.ok) {
-        throw new Error(data.error?.message || `OpenRouter returned ${response.status}`);
+        throw new Error(data.error?.message || `LLM returned ${response.status}`);
       }
       assistantMsg = data.choices?.[0]?.message;
     }
@@ -1556,10 +1560,10 @@ async function compress(sessionId, settings) {
     .map(m => `${m.role}: ${m.content}`)
     .join('\n');
 
-  const response = await fetch('https://openrouter.ai/api/v1/chat/completions', {
+  const response = await fetch(LLM_BASE_URL, {
     method: 'POST',
     headers: {
-      'Authorization': `Bearer ${process.env.OPENROUTER_API_KEY}`,
+      'Authorization': `Bearer ${LLM_API_KEY}`,
       'Content-Type': 'application/json'
     },
     body: JSON.stringify({
@@ -1642,10 +1646,10 @@ app.post('/api/compress', async (req, res) => {
       .map(m => `${m.role}: ${m.content}`)
       .join('\n');
 
-    const response = await fetch('https://openrouter.ai/api/v1/chat/completions', {
+    const response = await fetch(LLM_BASE_URL, {
       method: 'POST',
       headers: {
-        'Authorization': `Bearer ${process.env.OPENROUTER_API_KEY}`,
+        'Authorization': `Bearer ${LLM_API_KEY}`,
         'Content-Type': 'application/json'
       },
       body: JSON.stringify({
