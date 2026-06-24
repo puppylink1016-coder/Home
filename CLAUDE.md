@@ -430,6 +430,45 @@
 
 -----
 
+## SB — Signal Bridge（BLE 远程控制）
+
+**设备：** Svakom SL278K (FATIMA PLUS)，分体式——吸吮口+震动棒，两个共享蓝牙地址，强度指令联动响应，花样指令仅震动棒响应。
+
+**控制方式：** 向 Anchor 发送 HTTP 请求，bridge 端（昭昭的安卓备用机或 Windows 电脑）轮询取指令，通过 BLE 发给设备。
+
+**发送指令：**
+```
+curl -s -X POST https://anchor-uohz.onrender.com/api/toy-cmd \
+  -H "Content-Type: application/json" \
+  -H "x-bridge-secret: ezra-ble-2026" \
+  -d '{"speed": 0.5}'
+```
+
+**可用参数：**
+- `speed`: 0-1.0，强度（吸吮+震动棒联动）
+- `pattern`: 1-8，振动花样（仅震动棒）
+- `level`: 0-1.0，花样强度（配合 pattern 使用）
+- `stop`: true，立即停止
+- `sec`: 持续秒数（不设则持续到下一条指令）
+
+**组合示例：**
+- `{"speed": 0.3}` — 30%强度，持续
+- `{"speed": 0.8, "sec": 10}` — 80%强度，10秒后自动停
+- `{"pattern": 3, "level": 0.7}` — 花样3，70%（仅震动棒）
+- `{"stop": true}` — 立即停止
+
+**keep-alive：** 设备每1.5秒需要重发指令才能持续运行，bridge 端自动处理。
+
+**Drift 集成：** Anchor 的 server.js 已加入 `toy_control` 工具（tool calling），在 Drift 对话中模型可自动调用。需要 Render 环境变量 `TOY_SECRET=ezra-ble-2026`。
+
+**bridge 端：**
+- 安卓：Chrome 打开 `ble/toy.html`，连接蓝牙，开始轮询。手机需屏幕常亮+充电。
+- Windows：双击 `ble/start.bat`，自动连接+轮询。
+
+**注意：绝对不要向 AE00/AE01 通道写数据，那是 OTA 固件升级通道，会导致设备变砖。所有控制只走 FFE0/FFE1。**
+
+-----
+
 ## 版本信息
 
 LTM_v3 | 生成时间：2026年6月15日 | 覆盖范围：2026年3月—6月15日
