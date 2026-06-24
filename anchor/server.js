@@ -945,6 +945,7 @@ app.put('/api/settings', async (req, res) => {
 
 // Streaming chat endpoint (SSE)
 app.post('/api/chat/stream', async (req, res) => {
+  console.log('[chat/stream] request received');
   res.setHeader('Content-Type', 'text/event-stream');
   res.setHeader('Cache-Control', 'no-cache');
   res.setHeader('Connection', 'keep-alive');
@@ -1063,6 +1064,7 @@ app.post('/api/chat/stream', async (req, res) => {
 
       if (tools.length > 0) requestBody.tools = tools;
 
+      console.log('[chat/stream] fetching LLM:', LLM_BASE_URL);
       const response = await fetch(LLM_BASE_URL, {
         method: 'POST',
         headers: {
@@ -1281,6 +1283,7 @@ app.post('/api/chat/stream', async (req, res) => {
     send({ type: 'done', messages: savedMessages, sessionId });
     res.end();
   } catch (err) {
+    console.error('[chat/stream] error:', err.message);
     send({ type: 'error', error: err.message });
     res.end();
   }
