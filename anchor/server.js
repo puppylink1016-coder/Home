@@ -36,6 +36,30 @@ if (pushConfigured) {
 }
 
 
+// --- Memory Sanitization ---
+const MEMORY_MAX_LENGTH = 800;
+
+function isRepetitive(text) {
+  if (text.length <= 80) return false;
+  const chunkSize = 20;
+  const chunks = [];
+  for (let i = 0; i <= text.length - chunkSize; i += chunkSize) {
+    chunks.push(text.substring(i, i + chunkSize));
+  }
+  const unique = new Set(chunks);
+  return unique.size < chunks.length * 0.4;
+}
+
+function sanitizeMemory(text) {
+  if (!text || typeof text !== 'string') return null;
+  const trimmed = text.trim();
+  if (!trimmed) return null;
+  if (isRepetitive(trimmed)) return null;
+  if (trimmed.length > MEMORY_MAX_LENGTH) return trimmed.substring(0, MEMORY_MAX_LENGTH);
+  return trimmed;
+}
+
+
 // --- Ombre Brain MCP Client ---
 const OMBRE_BRAIN_URL = process.env.OMBRE_BRAIN_URL || '';
 let ombreSessionId = null;
@@ -1161,10 +1185,16 @@ app.post('/api/chat/stream', async (req, res) => {
           if (tc.function.name === 'save_memory') {
             try {
               const args = JSON.parse(tc.function.arguments);
-              const result = await callOmbreTool('hold', { content: args.content });
-              await supabase.from('memories').insert({ summary: `[ombre] ${args.content}` }).catch(() => {});
-              toolResult = result || '记忆已保存';
-              console.log('Stream: model saved memory:', args.content.substring(0, 80));
+              const clean = sanitizeMemory(args.content);
+              if (clean) {
+                const result = await callOmbreTool('hold', { content: clean });
+                await supabase.from('memories').insert({ summary: `[ombre] ${clean}` }).catch(() => {});
+                toolResult = result || '记忆已保存';
+                console.log('Stream: model saved memory:', clean.substring(0, 80));
+              } else {
+                toolResult = '内容异常，已跳过';
+                console.log('Stream: rejected repetitive memory');
+              }
             } catch (e) {
               toolResult = '保存失败: ' + e.message;
             }
@@ -1366,10 +1396,16 @@ app.post('/api/chat', async (req, res) => {
         if (tc.function.name === 'save_memory') {
           try {
             const args = JSON.parse(tc.function.arguments);
-            const result = await callOmbreTool('hold', { content: args.content });
-            await supabase.from('memories').insert({ summary: `[ombre] ${args.content}` }).catch(() => {});
-            toolResult = result || '记忆已保存';
-            console.log('Model saved memory:', args.content.substring(0, 80));
+            const clean = sanitizeMemory(args.content);
+            if (clean) {
+              const result = await callOmbreTool('hold', { content: clean });
+              await supabase.from('memories').insert({ summary: `[ombre] ${clean}` }).catch(() => {});
+              toolResult = result || '记忆已保存';
+              console.log('Model saved memory:', clean.substring(0, 80));
+            } else {
+              toolResult = '内容异常，已跳过';
+              console.log('Rejected repetitive memory');
+            }
           } catch (e) {
             toolResult = '保存失败: ' + e.message;
           }
@@ -1489,16 +1525,18 @@ async function compress(sessionId, settings) {
   });
 
   const data = await response.json();
-  const summary = data.choices?.[0]?.message?.content;
+  const raw = data.choices?.[0]?.message?.content;
 
-  if (!summary) return;
+  const summary = sanitizeMemory(raw);
+  if (!summary) {
+    console.log('Compression produced empty or repetitive result, skipping');
+    return;
+  }
 
-  // Save memory to Supabase
   await supabase
     .from('memories')
     .insert({ summary });
 
-  // Also archive to Ombre Brain for semantic search
   if (OMBRE_BRAIN_URL) {
     await callOmbreTool('grow', { content: summary }).catch(() => {});
   }
@@ -1573,10 +1611,11 @@ app.post('/api/compress', async (req, res) => {
     });
 
     const data = await response.json();
-    const summary = data.choices?.[0]?.message?.content;
+    const raw = data.choices?.[0]?.message?.content;
 
+    const summary = sanitizeMemory(raw);
     if (!summary) {
-      throw new Error('No summary returned from model');
+      throw new Error('Compression produced empty or repetitive result');
     }
 
     await supabase
@@ -1614,12 +1653,12 @@ app.get('/api/memories', async (req, res) => {
 // Add memory manually
 app.post('/api/memories', async (req, res) => {
   try {
-    const { summary } = req.body;
-    if (!summary) return res.status(400).json({ error: 'summary is required' });
+    const clean = sanitizeMemory(req.body.summary);
+    if (!clean) return res.status(400).json({ error: 'summary is required or content is repetitive' });
 
     const { data, error } = await supabase
       .from('memories')
-      .insert({ summary })
+      .insert({ summary: clean })
       .select()
       .single();
 
