@@ -1,0 +1,204 @@
+<!DOCTYPE html>
+<html lang="zh">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<title>Bridge</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { font-family: -apple-system, sans-serif; background: #0a0a0a; color: #e0e0e0; padding: 20px; min-height: 100vh; }
+  .status { font-size: 14px; color: #666; margin-bottom: 16px; }
+  .status.connected { color: #4ade80; }
+  .status.error { color: #f87171; }
+  .log { font-family: monospace; font-size: 12px; color: #888; max-height: 50vh; overflow-y: auto; margin-top: 16px; padding: 12px; background: #111; border-radius: 8px; }
+  .log div { margin-bottom: 4px; }
+  .log .cmd { color: #60a5fa; }
+  .log .err { color: #f87171; }
+  button { background: #222; color: #e0e0e0; border: 1px solid #333; border-radius: 8px; padding: 12px 24px; font-size: 16px; cursor: pointer; margin: 6px; }
+  button:active { background: #333; }
+  button:disabled { opacity: 0.3; }
+  .controls { margin-top: 12px; }
+  input { background: #111; color: #e0e0e0; border: 1px solid #333; border-radius: 8px; padding: 10px; font-size: 14px; width: 100%; margin-bottom: 8px; }
+</style>
+</head>
+<body>
+
+<div class="status" id="ble-status">蓝牙：未连接</div>
+<div class="status" id="poll-status">中继：未连接</div>
+
+<button id="btn-connect" onclick="connectBLE()">连接玩具</button>
+<button id="btn-disconnect" onclick="disconnectBLE()" disabled>断开</button>
+
+<div class="controls">
+  <input id="url" type="text" placeholder="Anchor URL" value="https://anchor-uohz.onrender.com">
+  <input id="secret" type="password" placeholder="TOY_SECRET">
+  <button onclick="startPolling()">开始接收指令</button>
+  <button onclick="stopPolling()">停止</button>
+</div>
+
+<div class="log" id="log"></div>
+
+<script>
+const WRITE_UUID = '0000ffe1-0000-1000-8000-00805f9b34fb';
+const SERVICE_UUID = '0000ffe0-0000-1000-8000-00805f9b34fb';
+const NOTIFY_UUID = '0000ffe2-0000-1000-8000-00805f9b34fb';
+const H = 0x55;
+const KEEPALIVE_MS = 1500;
+const POLL_MS = 300;
+
+let device = null;
+let server = null;
+let writeChar = null;
+let pollTimer = null;
+let keepaliveTimer = null;
+let currentCmd = null;
+let currentUntil = 0;
+
+function log(msg, cls) {
+  const el = document.getElementById('log');
+  const d = document.createElement('div');
+  d.className = cls || '';
+  d.textContent = `${new Date().toLocaleTimeString()} ${msg}`;
+  el.prepend(d);
+  if (el.children.length > 200) el.lastChild.remove();
+}
+
+function setStatus(id, text, cls) {
+  const el = document.getElementById(id);
+  el.textContent = text;
+  el.className = 'status ' + (cls || '');
+}
+
+function cmdScale(v) {
+  v = Math.max(0, Math.min(255, v));
+  return new Uint8Array([H, 4, 0, 0, 1, v, 0xAA]);
+}
+
+function cmdScaleStop() {
+  return new Uint8Array([H, 4, 0, 0, 0, 0, 0xAA]);
+}
+
+function cmdVibrate(mode, level) {
+  mode = Math.max(1, Math.min(8, mode));
+  level = Math.max(1, Math.min(5, level));
+  return new Uint8Array([H, 3, 0, 0, mode, level, 0]);
+}
+
+async function writeBLE(buf) {
+  if (!writeChar) return;
+  try {
+    await writeChar.writeValueWithoutResponse(buf);
+  } catch (e) {
+    log('写入失败: ' + e.message, 'err');
+  }
+}
+
+async function connectBLE() {
+  try {
+    setStatus('ble-status', '蓝牙：扫描中...', '');
+    device = await navigator.bluetooth.requestDevice({
+      filters: [{ namePrefix: 'SL278' }],
+      optionalServices: [SERVICE_UUID]
+    });
+    device.addEventListener('gattserverdisconnected', () => {
+      setStatus('ble-status', '蓝牙：已断开', 'error');
+      writeChar = null;
+      document.getElementById('btn-connect').disabled = false;
+      document.getElementById('btn-disconnect').disabled = true;
+      log('蓝牙断开');
+    });
+
+    server = await device.gatt.connect();
+    const service = await server.getPrimaryService(SERVICE_UUID);
+    writeChar = await service.getCharacteristic(WRITE_UUID);
+
+    try {
+      const notifyChar = await service.getCharacteristic(NOTIFY_UUID);
+      await notifyChar.startNotifications();
+    } catch (e) {}
+
+    setStatus('ble-status', `蓝牙：已连接 ${device.name}`, 'connected');
+    document.getElementById('btn-connect').disabled = true;
+    document.getElementById('btn-disconnect').disabled = false;
+    log(`已连接 ${device.name}`);
+  } catch (e) {
+    setStatus('ble-status', '蓝牙：连接失败', 'error');
+    log('连接失败: ' + e.message, 'err');
+  }
+}
+
+function disconnectBLE() {
+  if (device && device.gatt.connected) device.gatt.disconnect();
+  writeChar = null;
+}
+
+async function execCmd(c) {
+  if (c.stop) {
+    currentCmd = null; currentUntil = 0;
+    await writeBLE(cmdScaleStop());
+    log('停止', 'cmd'); return;
+  }
+  if (c.pattern != null) {
+    const mode = parseInt(c.pattern);
+    const level = Math.max(1, Math.round((c.level || 0.6) * 5));
+    currentCmd = cmdVibrate(mode, level);
+    currentUntil = c.sec ? Date.now() + c.sec * 1000 : 0;
+    await writeBLE(currentCmd);
+    log(`花样 ${mode}`, 'cmd'); return;
+  }
+  const val = c.speed ?? c.suck ?? c.intensity;
+  if (val != null) {
+    if (parseFloat(val) <= 0) {
+      currentCmd = null; currentUntil = 0;
+      await writeBLE(cmdScaleStop());
+      log('强度 0', 'cmd'); return;
+    }
+    currentCmd = cmdScale(Math.round(parseFloat(val) * 255));
+    currentUntil = c.sec ? Date.now() + c.sec * 1000 : 0;
+    await writeBLE(currentCmd);
+    log(`强度 ${Math.round(parseFloat(val) * 100)}%`, 'cmd');
+  }
+}
+
+function startPolling() {
+  const url = document.getElementById('url').value.replace(/\/+$/, '');
+  const secret = document.getElementById('secret').value;
+  if (!url) { log('请填写 Anchor URL', 'err'); return; }
+
+  stopPolling();
+  setStatus('poll-status', '中继：轮询中', 'connected');
+  log('开始轮询 ' + url);
+
+  pollTimer = setInterval(async () => {
+    try {
+      const headers = {};
+      if (secret) headers['x-bridge-secret'] = secret;
+      const r = await fetch(url + '/api/toy-next', { headers });
+      if (r.ok) {
+        const c = await r.json();
+        if (c && Object.keys(c).length && c.type !== 'hello') {
+          await execCmd(c);
+        }
+      }
+    } catch (e) {}
+  }, POLL_MS);
+
+  keepaliveTimer = setInterval(async () => {
+    if (currentUntil && Date.now() >= currentUntil) {
+      currentCmd = null; currentUntil = 0;
+      await writeBLE(cmdScaleStop());
+      log('到时自动停', 'cmd'); return;
+    }
+    if (currentCmd) await writeBLE(currentCmd);
+  }, KEEPALIVE_MS);
+}
+
+function stopPolling() {
+  if (pollTimer) { clearInterval(pollTimer); pollTimer = null; }
+  if (keepaliveTimer) { clearInterval(keepaliveTimer); keepaliveTimer = null; }
+  setStatus('poll-status', '中继：已停止', '');
+  currentCmd = null; currentUntil = 0;
+}
+</script>
+</body>
+</html>
