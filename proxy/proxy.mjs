@@ -20,13 +20,29 @@ function checkAuth(req, cors, res) {
   return false;
 }
 
+function normalizeModel(raw) {
+  if (!raw) return '';
+  let m = raw.replace(/^anthropic\//, '').replace(/^openai\//, '');
+  const ALIASES = {
+    'claude-opus-4-6': 'claude-opus-4-6',
+    'claude-opus-4-20250514': 'claude-opus-4-6',
+    'claude-sonnet-4-6': 'claude-sonnet-4-6',
+    'claude-sonnet-4-20250514': 'claude-sonnet-4-6',
+    'claude-haiku-4-5': 'claude-haiku-4-5',
+  };
+  return ALIASES[m] || m;
+}
+
 function spawnClaude(systemPrompt, userPrompt, model) {
+  const m = normalizeModel(model);
   const args = ['-p', '--output-format', 'stream-json', '--verbose', '--tools', 'none'];
   if (systemPrompt) args.push('--system-prompt', systemPrompt);
-  if (model && model !== 'claude-sonnet-4-6') args.push('--model', model);
+  if (m && m !== 'claude-sonnet-4-6') args.push('--model', m);
+  console.log(`[proxy] spawn claude | model: ${m || '(default)'} | prompt: ${userPrompt.length} chars | system: ${systemPrompt?.length || 0} chars`);
   const child = spawn('claude', args, { stdio: ['pipe', 'pipe', 'pipe'], cwd: CLAUDE_CWD });
   child.stdin.write(userPrompt);
   child.stdin.end();
+  child.stderr.on('data', d => console.error(`[claude stderr] ${d.toString().trim()}`));
   return child;
 }
 
@@ -54,6 +70,7 @@ const server = createServer(async (req, res) => {
   if (req.url === '/v1/chat/completions' && req.method === 'POST') {
     if (!checkAuth(req, CORS, res)) return;
     const body = JSON.parse(await readBody(req));
+    console.log(`[proxy] /v1/chat/completions | model: ${body.model} | stream: ${body.stream} | msgs: ${body.messages?.length}`);
     const { system, prompt } = openaiMessagesToPrompt(body.messages);
     const isStream = body.stream === true;
     const model = body.model || '';
@@ -108,7 +125,7 @@ const server = createServer(async (req, res) => {
           }
         }
       });
-      child.stderr.on('data', () => {});
+      child.stderr.on('data', () => {}); // handled in spawnClaude
       child.on('close', () => { res.end(); });
       child.on('error', () => { res.end(); });
       req.on('close', () => { try { child.kill(); } catch {} });
@@ -183,7 +200,7 @@ const server = createServer(async (req, res) => {
           } catch {}
         }
       });
-      child.stderr.on('data', () => {});
+      child.stderr.on('data', () => {}); // handled in spawnClaude
       child.on('close', () => { res.end(); });
       child.on('error', () => { res.end(); });
       req.on('close', () => { try { child.kill(); } catch {} });
