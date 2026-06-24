@@ -923,7 +923,7 @@ app.post('/api/chat/stream', async (req, res) => {
   }
 
   try {
-    let { message, sessionId, imageUrl } = req.body;
+    let { message, sessionId, imageUrl, context } = req.body;
     if (!message && !imageUrl) {
       send({ type: 'error', error: 'Message or image is required' });
       return res.end();
@@ -963,6 +963,9 @@ app.post('/api/chat/stream', async (req, res) => {
 
     const thinkingInstruction = '在每次回复的最开头，用[THINKING]和[/THINKING]包裹你的内心独白，必须使用中文，以第一人称视角。[/THINKING]之后写正式回复。';
     let systemContent = [thinkingInstruction, settings.system_prompt || '', RESPONSE_SPLIT_INSTRUCTION].filter(Boolean).join('\n\n');
+    if (context?.time) {
+      systemContent += `\n\n【此刻】${context.time.formatted}`;
+    }
     if (ombreMemories) {
       systemContent += '\n\n## 相关记忆（语义检索）\n' + ombreMemories;
     }

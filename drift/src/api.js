@@ -1,4 +1,5 @@
 import { API_URL, AUTH_TOKEN } from './config';
+import { getTimeContext } from './context';
 
 function fetchWithAuth(url, options = {}) {
   const headers = {
@@ -81,7 +82,7 @@ export function sendMessageStream(message, sessionId, { onToken, onThinking, onS
   const headers = { 'Content-Type': 'application/json' };
   if (AUTH_TOKEN) headers['Authorization'] = `Bearer ${AUTH_TOKEN}`;
 
-  const body = { message, sessionId };
+  const body = { message, sessionId, context: { time: getTimeContext() } };
   if (imageUrl) body.imageUrl = imageUrl;
 
   fetch(`${API_URL}/api/chat/stream`, {
