@@ -96,29 +96,27 @@ const server = createServer(async (req, res) => {
           let ev;
           try { ev = JSON.parse(line); } catch { continue; }
 
-          if (ev.type === 'stream_event') {
-            const se = ev.event || {};
-            if (se.type === 'content_block_start') {
-              const cb = se.content_block || {};
-              inThinking = cb.type === 'thinking';
-              if (inThinking) {
-                sse({ id: chatId, object: 'chat.completion.chunk', choices: [{ index: 0, delta: sentRole ? { content: '[THINKING]' } : { role: 'assistant', content: '[THINKING]' }, finish_reason: null }] });
-                sentRole = true;
-              } else if (!sentRole) {
-                sse({ id: chatId, object: 'chat.completion.chunk', choices: [{ index: 0, delta: { role: 'assistant', content: '' }, finish_reason: null }] });
-                sentRole = true;
-              }
-            } else if (se.type === 'content_block_delta') {
-              const d = se.delta || {};
-              const text = d.text || d.thinking || '';
-              if (text) {
-                sse({ id: chatId, object: 'chat.completion.chunk', choices: [{ index: 0, delta: { content: text }, finish_reason: null }] });
-              }
-            } else if (se.type === 'content_block_stop') {
-              if (inThinking) {
-                sse({ id: chatId, object: 'chat.completion.chunk', choices: [{ index: 0, delta: { content: '[/THINKING]' }, finish_reason: null }] });
-                inThinking = false;
-              }
+          const se = ev.type === 'stream_event' ? (ev.event || {}) : ev;
+          if (se.type === 'content_block_start') {
+            const cb = se.content_block || {};
+            inThinking = cb.type === 'thinking';
+            if (inThinking) {
+              sse({ id: chatId, object: 'chat.completion.chunk', choices: [{ index: 0, delta: sentRole ? { content: '[THINKING]' } : { role: 'assistant', content: '[THINKING]' }, finish_reason: null }] });
+              sentRole = true;
+            } else if (!sentRole) {
+              sse({ id: chatId, object: 'chat.completion.chunk', choices: [{ index: 0, delta: { role: 'assistant', content: '' }, finish_reason: null }] });
+              sentRole = true;
+            }
+          } else if (se.type === 'content_block_delta') {
+            const d = se.delta || {};
+            const text = d.text || d.thinking || '';
+            if (text) {
+              sse({ id: chatId, object: 'chat.completion.chunk', choices: [{ index: 0, delta: { content: text }, finish_reason: null }] });
+            }
+          } else if (se.type === 'content_block_stop') {
+            if (inThinking) {
+              sse({ id: chatId, object: 'chat.completion.chunk', choices: [{ index: 0, delta: { content: '[/THINKING]' }, finish_reason: null }] });
+              inThinking = false;
             }
           } else if (ev.type === 'result') {
             sse({ id: chatId, object: 'chat.completion.chunk', choices: [{ index: 0, delta: {}, finish_reason: 'stop' }], usage: { prompt_tokens: ev.usage?.input_tokens || 0, completion_tokens: ev.usage?.output_tokens || 0 } });
@@ -183,8 +181,7 @@ const server = createServer(async (req, res) => {
           if (!line.trim()) continue;
           try {
             const ev = JSON.parse(line);
-            if (ev.type === 'stream_event') {
-              const se = ev.event || {};
+            const se = ev.type === 'stream_event' ? (ev.event || {}) : ev;
               if (se.type === 'content_block_start') {
                 const cb = se.content_block || {};
                 res.write(`event: content_block_start\ndata: ${JSON.stringify({type:"content_block_start",index:blockIdx,content_block:{type:cb.type,text:cb.type==='text'?'':undefined,thinking:cb.type==='thinking'?'':undefined}})}\n\n`);
