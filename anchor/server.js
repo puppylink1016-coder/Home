@@ -1077,12 +1077,15 @@ app.post('/api/chat/stream', async (req, res) => {
         body: JSON.stringify(requestBody),
       });
 
+      console.log('[chat/stream] LLM response status:', response.status);
+
       if (!response.ok) {
         const err = await response.text();
         throw new Error(`LLM ${response.status}: ${err}`);
       }
 
       const reader = response.body.getReader();
+      console.log('[chat/stream] reader created, starting stream');
       const decoder = new TextDecoder();
       let buffer = '';
       let roundContent = '';
@@ -1142,9 +1145,12 @@ app.post('/api/chat/stream', async (req, res) => {
         }
       }
 
+      let chunkCount = 0;
       while (true) {
         const { done, value } = await reader.read();
-        if (done) break;
+        if (done) { console.log('[chat/stream] reader done, chunks:', chunkCount); break; }
+        chunkCount++;
+        if (chunkCount <= 3) console.log('[chat/stream] chunk', chunkCount, ':', decoder.decode(value).slice(0, 200));
 
         buffer += decoder.decode(value, { stream: true });
         const lines = buffer.split('\n');
