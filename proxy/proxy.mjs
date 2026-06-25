@@ -81,6 +81,7 @@ const server = createServer(async (req, res) => {
     if (isStream) {
       res.writeHead(200, { ...CORS, 'Content-Type': 'text/event-stream', 'Cache-Control': 'no-cache', 'Connection': 'keep-alive' });
 
+      const keepAlive = setInterval(() => { res.write(': keepalive\n\n'); }, 5000);
       function sse(obj) { res.write(`data: ${JSON.stringify(obj)}\n\n`); }
       let buf = '';
       let inThinking = false;
@@ -126,9 +127,9 @@ const server = createServer(async (req, res) => {
         }
       });
       child.stderr.on('data', () => {}); // handled in spawnClaude
-      child.on('close', () => { res.end(); });
-      child.on('error', () => { res.end(); });
-      req.on('close', () => { try { child.kill(); } catch {} });
+      child.on('close', () => { clearInterval(keepAlive); res.end(); });
+      child.on('error', () => { clearInterval(keepAlive); res.end(); });
+      req.on('close', () => { clearInterval(keepAlive); try { child.kill(); } catch {} });
 
     } else {
       let output = '';
