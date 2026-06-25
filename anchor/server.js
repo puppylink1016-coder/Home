@@ -29,6 +29,96 @@ const storageSupabase = supabaseAdmin;
 // BLE toy relay queue
 const toyQueue = [];
 const TOY_SECRET = process.env.TOY_SECRET || '';
+const TOY_MAX_SECONDS = Number(process.env.TOY_MAX_SECONDS || 30);
+
+const TOY_MARKER_OPEN = '[TOY:';
+const TOY_MARKER_MAX_LENGTH = 220;
+
+const TOY_TRIGGER_INSTRUCTION = `## 玩具控制规则
+当你想控制玩具时，在正式回复中插入一个独立标记，格式为 [TOY:参数]。这个标记不会展示给用户。
+可用参数：speed=0-1，pattern=1-8，level=0-1，sec=1-${TOY_MAX_SECONDS}，stop=true。
+示例：[TOY:speed=0.5] 或 [TOY:pattern=3,level=0.7,sec=10] 或 [TOY:stop=true]。
+只在确实需要控制时使用，不要解释这个标记，不要把它放进代码块。`;
+
+function clampNumber(value, min, max) {
+  const num = Number(value);
+  if (!Number.isFinite(num)) return null;
+  return Math.min(max, Math.max(min, num));
+}
+
+function parseBooleanFlag(value) {
+  if (typeof value === 'boolean') return value;
+  return /^(true|1|yes|y|on|stop)$/i.test(String(value || '').trim());
+}
+
+function parseToyCommandParams(raw = '') {
+  const cmd = {};
+  const pairs = String(raw).split(',');
+
+  for (const pair of pairs) {
+    const [rawKey, ...rest] = pair.split('=');
+    const key = rawKey?.trim().toLowerCase();
+    const value = rest.join('=').trim();
+    if (!key || !value) continue;
+
+    if (key === 'speed') {
+      const speed = clampNumber(value, 0, 1);
+      if (speed !== null) cmd.speed = speed;
+    } else if (key === 'level') {
+      const level = clampNumber(value, 0, 1);
+      if (level !== null) cmd.level = level;
+    } else if (key === 'sec') {
+      const sec = clampNumber(value, 1, TOY_MAX_SECONDS);
+      if (sec !== null) cmd.sec = sec;
+    } else if (key === 'pattern') {
+      const pattern = Math.round(Number(value));
+      if (Number.isInteger(pattern) && pattern >= 1 && pattern <= 8) {
+        cmd.pattern = pattern;
+      }
+    } else if (key === 'stop' && parseBooleanFlag(value)) {
+      cmd.stop = true;
+    }
+  }
+
+  return Object.keys(cmd).length > 0 ? cmd : null;
+}
+
+function normalizeToyCommand(input = {}) {
+  if (!input || typeof input !== 'object') return null;
+  const cmd = {};
+
+  if ('speed' in input) {
+    const speed = clampNumber(input.speed, 0, 1);
+    if (speed !== null) cmd.speed = speed;
+  }
+  if ('level' in input) {
+    const level = clampNumber(input.level, 0, 1);
+    if (level !== null) cmd.level = level;
+  }
+  if ('sec' in input) {
+    const sec = clampNumber(input.sec, 1, TOY_MAX_SECONDS);
+    if (sec !== null) cmd.sec = sec;
+  }
+  if ('pattern' in input) {
+    const pattern = Math.round(Number(input.pattern));
+    if (Number.isInteger(pattern) && pattern >= 1 && pattern <= 8) {
+      cmd.pattern = pattern;
+    }
+  }
+  if ('stop' in input && parseBooleanFlag(input.stop)) {
+    cmd.stop = true;
+  }
+
+  return Object.keys(cmd).length > 0 ? cmd : null;
+}
+
+function enqueueToyCommand(input, source = 'unknown') {
+  const cmd = normalizeToyCommand(input);
+  if (!cmd) return null;
+  toyQueue.push(cmd);
+  console.log(`Toy command queued from ${source}:`, JSON.stringify(cmd));
+  return cmd;
+}
 
 // LLM API config: proxy on VPS or OpenRouter fallback
 const LLM_BASE_URL = process.env.LLM_BASE_URL || 'https://openrouter.ai/api/v1/chat/completions';
@@ -422,6 +512,75 @@ function splitAssistantContent(content) {
   }
   if (bucket) grouped.push(bucket);
   return grouped.length > 1 ? grouped : [clean];
+}
+
+function getPendingToyMarkerOpenLength(text) {
+  const max = Math.min(TOY_MARKER_OPEN.length - 1, text.length);
+  for (let len = max; len > 0; len--) {
+    if (TOY_MARKER_OPEN.startsWith(text.slice(-len))) {
+      return len;
+    }
+  }
+  return 0;
+}
+
+function createToyMarkupFilter(source) {
+  let buffer = '';
+
+  function drain(flush = false) {
+    let visible = '';
+
+    while (buffer) {
+      const start = buffer.indexOf(TOY_MARKER_OPEN);
+      if (start === -1) {
+        if (flush) {
+          visible += buffer;
+          buffer = '';
+        } else {
+          const keep = getPendingToyMarkerOpenLength(buffer);
+          visible += buffer.slice(0, buffer.length - keep);
+          buffer = buffer.slice(buffer.length - keep);
+        }
+        break;
+      }
+
+      if (start > 0) {
+        visible += buffer.slice(0, start);
+        buffer = buffer.slice(start);
+        continue;
+      }
+
+      const end = buffer.indexOf(']');
+      if (end === -1) {
+        if (flush || buffer.length > TOY_MARKER_MAX_LENGTH) {
+          buffer = '';
+        }
+        break;
+      }
+
+      const rawParams = buffer.slice(TOY_MARKER_OPEN.length, end);
+      const cmd = parseToyCommandParams(rawParams);
+      if (cmd) enqueueToyCommand(cmd, source);
+      buffer = buffer.slice(end + 1);
+    }
+
+    return visible;
+  }
+
+  return {
+    push(text) {
+      buffer += text;
+      return drain(false);
+    },
+    flush() {
+      return drain(true);
+    },
+  };
+}
+
+function stripToyMarkupAndQueue(text, source) {
+  const filter = createToyMarkupFilter(source);
+  return filter.push(String(text || '')) + filter.flush();
 }
 
 
@@ -998,7 +1157,9 @@ app.post('/api/chat/stream', async (req, res) => {
     }
 
     const thinkingInstruction = '在每次回复的最开头，用[THINKING]和[/THINKING]包裹你的内心独白，必须使用中文，以第一人称视角。[/THINKING]之后写正式回复。';
-    let systemContent = [thinkingInstruction, settings.system_prompt || '', RESPONSE_SPLIT_INSTRUCTION].filter(Boolean).join('\n\n');
+    const systemParts = [thinkingInstruction, settings.system_prompt || '', RESPONSE_SPLIT_INSTRUCTION];
+    if (TOY_SECRET) systemParts.push(TOY_TRIGGER_INSTRUCTION);
+    let systemContent = systemParts.filter(Boolean).join('\n\n');
     if (context?.time) {
       systemContent += `\n\n【此刻】${context.time.formatted}`;
     }
@@ -1091,11 +1252,22 @@ app.post('/api/chat/stream', async (req, res) => {
       let roundContent = '';
       let roundThinking = '';
       const toolCallChunks = {};
+      const toyMarkupFilter = createToyMarkupFilter('assistant-markup');
 
       let contentPhase = 'detect';
       let phaseBuffer = '';
       const THINK_OPEN = '[THINKING]';
       const THINK_CLOSE = '[/THINKING]';
+
+      function appendVisibleContent(text) {
+        if (!text) return;
+        roundContent += text;
+        send({ type: 'token', content: text });
+      }
+
+      function emitContent(text) {
+        appendVisibleContent(toyMarkupFilter.push(text));
+      }
 
       function flushPhase() {
         if (contentPhase === 'detect') {
@@ -1105,15 +1277,13 @@ app.post('/api/chat/stream', async (req, res) => {
               phaseBuffer = phaseBuffer.slice(THINK_OPEN.length);
             } else {
               contentPhase = 'content';
-              roundContent += phaseBuffer;
-              send({ type: 'token', content: phaseBuffer });
+              emitContent(phaseBuffer);
               phaseBuffer = '';
               return;
             }
           } else if (!THINK_OPEN.startsWith(phaseBuffer)) {
             contentPhase = 'content';
-            roundContent += phaseBuffer;
-            send({ type: 'token', content: phaseBuffer });
+            emitContent(phaseBuffer);
             phaseBuffer = '';
             return;
           } else {
@@ -1129,7 +1299,7 @@ app.post('/api/chat/stream', async (req, res) => {
             let rest = phaseBuffer.slice(endIdx + THINK_CLOSE.length);
             if (rest.startsWith('\n')) rest = rest.slice(1);
             phaseBuffer = '';
-            if (rest) { roundContent += rest; send({ type: 'token', content: rest }); }
+            if (rest) emitContent(rest);
           } else {
             let safe = phaseBuffer.length;
             for (let i = 1; i < THINK_CLOSE.length; i++) {
@@ -1172,8 +1342,7 @@ app.post('/api/chat/stream', async (req, res) => {
 
           if (delta.content) {
             if (contentPhase === 'content') {
-              roundContent += delta.content;
-              send({ type: 'token', content: delta.content });
+              emitContent(delta.content);
             } else {
               phaseBuffer += delta.content;
               flushPhase();
@@ -1199,11 +1368,12 @@ app.post('/api/chat/stream', async (req, res) => {
           roundThinking += phaseBuffer;
           send({ type: 'thinking', content: phaseBuffer });
         } else {
-          roundContent += phaseBuffer;
-          send({ type: 'token', content: phaseBuffer });
+          emitContent(phaseBuffer);
         }
         phaseBuffer = '';
       }
+
+      appendVisibleContent(toyMarkupFilter.flush());
 
       const hasToolCalls = Object.keys(toolCallChunks).length > 0;
 
@@ -1240,9 +1410,8 @@ app.post('/api/chat/stream', async (req, res) => {
           } else if (tc.function.name === 'toy_control') {
             try {
               const cmd = JSON.parse(tc.function.arguments);
-              toyQueue.push(cmd);
-              toolResult = cmd.stop ? '已停止' : '已发送';
-              console.log('Toy command queued:', JSON.stringify(cmd));
+              const queued = enqueueToyCommand(cmd, 'tool-call');
+              toolResult = queued ? (queued.stop ? '已停止' : '已发送') : '指令无效，已跳过';
             } catch (e) {
               toolResult = '指令解析失败: ' + e.message;
             }
@@ -1484,9 +1653,8 @@ app.post('/api/chat', async (req, res) => {
         } else if (tc.function.name === 'toy_control') {
           try {
             const cmd = JSON.parse(tc.function.arguments);
-            toyQueue.push(cmd);
-            toolResult = cmd.stop ? '已停止' : '已发送';
-            console.log('Toy command queued:', JSON.stringify(cmd));
+            const queued = enqueueToyCommand(cmd, 'tool-call');
+            toolResult = queued ? (queued.stop ? '已停止' : '已发送') : '指令无效，已跳过';
           } catch (e) {
             toolResult = '指令解析失败: ' + e.message;
           }
@@ -1511,7 +1679,7 @@ app.post('/api/chat', async (req, res) => {
       assistantMsg = data.choices?.[0]?.message;
     }
 
-    const rawContent = assistantMsg?.content;
+    const rawContent = stripToyMarkupAndQueue(assistantMsg?.content || '', 'assistant-markup');
     if (!rawContent) {
       throw new Error('No response content from model');
     }
@@ -1827,11 +1995,11 @@ app.get('/api/toy-next', (req, res) => {
 app.post('/api/toy-cmd', (req, res) => {
   const secret = req.headers['x-bridge-secret'] || req.query.secret || '';
   if (TOY_SECRET && secret !== TOY_SECRET) return res.status(401).json({});
-  const cmd = req.body;
-  if (cmd && Object.keys(cmd).length) {
-    toyQueue.push(cmd);
+  const cmd = enqueueToyCommand(req.body, 'api');
+  if (!cmd) {
+    return res.status(400).json({ ok: false, error: 'Invalid toy command' });
   }
-  res.json({ ok: true });
+  res.json({ ok: true, cmd });
 });
 
 app.listen(PORT, () => {
