@@ -182,15 +182,14 @@ const server = createServer(async (req, res) => {
           try {
             const ev = JSON.parse(line);
             const se = ev.type === 'stream_event' ? (ev.event || {}) : ev;
-              if (se.type === 'content_block_start') {
-                const cb = se.content_block || {};
-                res.write(`event: content_block_start\ndata: ${JSON.stringify({type:"content_block_start",index:blockIdx,content_block:{type:cb.type,text:cb.type==='text'?'':undefined,thinking:cb.type==='thinking'?'':undefined}})}\n\n`);
-              } else if (se.type === 'content_block_delta') {
-                res.write(`event: content_block_delta\ndata: ${JSON.stringify({type:"content_block_delta",index:blockIdx,delta:se.delta||{}})}\n\n`);
-              } else if (se.type === 'content_block_stop') {
-                res.write(`event: content_block_stop\ndata: ${JSON.stringify({type:"content_block_stop",index:blockIdx})}\n\n`);
-                blockIdx++;
-              }
+            if (se.type === 'content_block_start') {
+              const cb = se.content_block || {};
+              res.write(`event: content_block_start\ndata: ${JSON.stringify({type:"content_block_start",index:blockIdx,content_block:{type:cb.type,text:cb.type==='text'?'':undefined,thinking:cb.type==='thinking'?'':undefined}})}\n\n`);
+            } else if (se.type === 'content_block_delta') {
+              res.write(`event: content_block_delta\ndata: ${JSON.stringify({type:"content_block_delta",index:blockIdx,delta:se.delta||{}})}\n\n`);
+            } else if (se.type === 'content_block_stop') {
+              res.write(`event: content_block_stop\ndata: ${JSON.stringify({type:"content_block_stop",index:blockIdx})}\n\n`);
+              blockIdx++;
             } else if (ev.type === 'result') {
               res.write(`event: message_delta\ndata: ${JSON.stringify({type:"message_delta",delta:{stop_reason:ev.stop_reason||"end_turn"},usage:{output_tokens:ev.usage?.output_tokens||0}})}\n\n`);
               res.write(`event: message_stop\ndata: ${JSON.stringify({type:"message_stop"})}\n\n`);
