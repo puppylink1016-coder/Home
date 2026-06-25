@@ -951,6 +951,8 @@ app.post('/api/chat/stream', async (req, res) => {
   res.setHeader('Connection', 'keep-alive');
   res.setHeader('X-Accel-Buffering', 'no');
 
+  const keepAlive = setInterval(() => { res.write(': keepalive\n\n'); }, 5000);
+
   function send(obj) {
     res.write(`data: ${JSON.stringify(obj)}\n\n`);
   }
@@ -959,6 +961,7 @@ app.post('/api/chat/stream', async (req, res) => {
     let { message, sessionId, imageUrl, context } = req.body;
     if (!message && !imageUrl) {
       send({ type: 'error', error: 'Message or image is required' });
+      clearInterval(keepAlive);
       return res.end();
     }
 
@@ -1253,6 +1256,7 @@ app.post('/api/chat/stream', async (req, res) => {
 
     if (!fullContent) {
       send({ type: 'error', error: 'No response from model' });
+      clearInterval(keepAlive);
       return res.end();
     }
 
@@ -1281,10 +1285,12 @@ app.post('/api/chat/stream', async (req, res) => {
     }
 
     send({ type: 'done', messages: savedMessages, sessionId });
+    clearInterval(keepAlive);
     res.end();
   } catch (err) {
     console.error('[chat/stream] error:', err.message);
     send({ type: 'error', error: err.message });
+    clearInterval(keepAlive);
     res.end();
   }
 });
