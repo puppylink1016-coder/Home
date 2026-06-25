@@ -35,7 +35,7 @@ function normalizeModel(raw) {
 
 function spawnClaude(systemPrompt, userPrompt, model) {
   const m = normalizeModel(model);
-  const args = ['-p', '--output-format', 'stream-json', '--verbose', '--tools', 'none'];
+  const args = ['-p', '--output-format', 'stream-json', '--verbose', '--include-partial-messages', '--tools', 'none'];
   if (systemPrompt) args.push('--system-prompt', systemPrompt);
   if (m && m !== 'claude-sonnet-4-6') args.push('--model', m);
   console.log(`[proxy] spawn claude | model: ${m || '(default)'} | prompt: ${userPrompt.length} chars | system: ${systemPrompt?.length || 0} chars`);
@@ -79,13 +79,14 @@ const server = createServer(async (req, res) => {
     const child = spawnClaude(system, prompt, model);
 
     if (isStream) {
-      res.writeHead(200, { ...CORS, 'Content-Type': 'text/event-stream', 'Cache-Control': 'no-cache', 'Connection': 'keep-alive' });
+      res.writeHead(200, { ...CORS, 'Content-Type': 'text/event-stream', 'Cache-Control': 'no-cache', 'Connection': 'keep-alive', 'X-Accel-Buffering': 'no' });
 
       const keepAlive = setInterval(() => { res.write(': keepalive\n\n'); }, 5000);
       function sse(obj) { res.write(`data: ${JSON.stringify(obj)}\n\n`); }
       let buf = '';
       let inThinking = false;
       let sentRole = false;
+      let sentResponseText = false;
 
       child.stdout.on('data', (chunk) => {
         buf += chunk.toString();
@@ -109,9 +110,12 @@ const server = createServer(async (req, res) => {
             }
           } else if (se.type === 'content_block_delta') {
             const d = se.delta || {};
-            const text = d.text || d.thinking || '';
-            if (text) {
-              sse({ id: chatId, object: 'chat.completion.chunk', choices: [{ index: 0, delta: { content: text }, finish_reason: null }] });
+            if (d.thinking) {
+              sse({ id: chatId, object: 'chat.completion.chunk', choices: [{ index: 0, delta: { content: d.thinking }, finish_reason: null }] });
+            }
+            if (d.text) {
+              sse({ id: chatId, object: 'chat.completion.chunk', choices: [{ index: 0, delta: { content: d.text }, finish_reason: null }] });
+              sentResponseText = true;
             }
           } else if (se.type === 'content_block_stop') {
             if (inThinking) {
@@ -119,6 +123,10 @@ const server = createServer(async (req, res) => {
               inThinking = false;
             }
           } else if (ev.type === 'result') {
+            if (ev.result && !sentResponseText) {
+              sse({ id: chatId, object: 'chat.completion.chunk', choices: [{ index: 0, delta: sentRole ? { content: ev.result } : { role: 'assistant', content: ev.result }, finish_reason: null }] });
+              sentRole = true;
+            }
             sse({ id: chatId, object: 'chat.completion.chunk', choices: [{ index: 0, delta: {}, finish_reason: 'stop' }], usage: { prompt_tokens: ev.usage?.input_tokens || 0, completion_tokens: ev.usage?.output_tokens || 0 } });
             res.write('data: [DONE]\n\n');
           }
@@ -168,10 +176,11 @@ const server = createServer(async (req, res) => {
     const child = spawnClaude(sysText, prompt, model);
 
     if (isStream) {
-      res.writeHead(200, { ...CORS, 'Content-Type': 'text/event-stream', 'Cache-Control': 'no-cache', 'Connection': 'keep-alive' });
+      res.writeHead(200, { ...CORS, 'Content-Type': 'text/event-stream', 'Cache-Control': 'no-cache', 'Connection': 'keep-alive', 'X-Accel-Buffering': 'no' });
       let msgId = `msg_proxy_${Date.now()}`;
       let blockIdx = 0;
       let buf = '';
+      let sentTextDelta = false;
       res.write(`event: message_start\ndata: ${JSON.stringify({type:"message_start",message:{id:msgId,type:"message",role:"assistant",content:[],model:model||"claude-sonnet-4-6",stop_reason:null,usage:{input_tokens:0,output_tokens:0}}})}\n\n`);
       child.stdout.on('data', (chunk) => {
         buf += chunk.toString();
@@ -186,11 +195,19 @@ const server = createServer(async (req, res) => {
               const cb = se.content_block || {};
               res.write(`event: content_block_start\ndata: ${JSON.stringify({type:"content_block_start",index:blockIdx,content_block:{type:cb.type,text:cb.type==='text'?'':undefined,thinking:cb.type==='thinking'?'':undefined}})}\n\n`);
             } else if (se.type === 'content_block_delta') {
-              res.write(`event: content_block_delta\ndata: ${JSON.stringify({type:"content_block_delta",index:blockIdx,delta:se.delta||{}})}\n\n`);
+              const d = se.delta || {};
+              if (d.text) sentTextDelta = true;
+              res.write(`event: content_block_delta\ndata: ${JSON.stringify({type:"content_block_delta",index:blockIdx,delta:d})}\n\n`);
             } else if (se.type === 'content_block_stop') {
               res.write(`event: content_block_stop\ndata: ${JSON.stringify({type:"content_block_stop",index:blockIdx})}\n\n`);
               blockIdx++;
             } else if (ev.type === 'result') {
+              if (ev.result && !sentTextDelta) {
+                res.write(`event: content_block_start\ndata: ${JSON.stringify({type:"content_block_start",index:blockIdx,content_block:{type:"text",text:""}})}\n\n`);
+                res.write(`event: content_block_delta\ndata: ${JSON.stringify({type:"content_block_delta",index:blockIdx,delta:{type:"text_delta",text:ev.result}})}\n\n`);
+                res.write(`event: content_block_stop\ndata: ${JSON.stringify({type:"content_block_stop",index:blockIdx})}\n\n`);
+                blockIdx++;
+              }
               res.write(`event: message_delta\ndata: ${JSON.stringify({type:"message_delta",delta:{stop_reason:ev.stop_reason||"end_turn"},usage:{output_tokens:ev.usage?.output_tokens||0}})}\n\n`);
               res.write(`event: message_stop\ndata: ${JSON.stringify({type:"message_stop"})}\n\n`);
             }
