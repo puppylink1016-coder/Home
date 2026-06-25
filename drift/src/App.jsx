@@ -5,6 +5,31 @@ import Settings from './components/Settings.jsx';
 import Memories from './components/Memories.jsx';
 import * as api from './api.js';
 
+const STREAM_SPLIT_MARKER = '---SPLIT---';
+
+function getPendingSplitMarkerLength(text) {
+  const max = Math.min(STREAM_SPLIT_MARKER.length - 1, text.length);
+  for (let len = max; len > 0; len--) {
+    if (STREAM_SPLIT_MARKER.startsWith(text.slice(-len))) {
+      return len;
+    }
+  }
+  return 0;
+}
+
+function splitStreamingContent(content) {
+  const normalized = String(content || '').replace(/\r\n/g, '\n');
+  const pendingLength = getPendingSplitMarkerLength(normalized);
+  const safeContent = pendingLength > 0
+    ? normalized.slice(0, -pendingLength)
+    : normalized;
+
+  return safeContent
+    .split(STREAM_SPLIT_MARKER)
+    .map((part) => part.trim())
+    .filter(Boolean);
+}
+
 function App() {
   const [sessions, setSessions] = useState([]);
   const [currentSessionId, setCurrentSessionId] = useState(null);
@@ -85,13 +110,20 @@ function App() {
         rafId = 0;
         setMessages((prev) => {
           const without = prev.filter((m) => !String(m.id).startsWith(streamPrefix));
-          return [...without, {
-            id: streamPrefix + '0',
+          let parts = splitStreamingContent(fullContent);
+          if (parts.length === 0 && (fullContent || thinkingContent)) {
+            parts = [''];
+          }
+
+          const streamingMessages = parts.map((part, i) => ({
+            id: streamPrefix + i,
             role: 'assistant',
-            content: fullContent,
-            thinking: thinkingContent,
-            streaming: true,
-          }];
+            content: part,
+            thinking: i === 0 ? thinkingContent : '',
+            streaming: i === parts.length - 1,
+          }));
+
+          return [...without, ...streamingMessages];
         });
       });
     };
@@ -120,7 +152,15 @@ function App() {
       onDone(data) {
         if (rafId) { cancelAnimationFrame(rafId); rafId = 0; }
         setLoading(false);
-        const final = (data.messages || []).map((m, i) => ({
+        const savedMessages = Array.isArray(data.messages) ? data.messages : [];
+        const fallbackMessages = splitStreamingContent(fullContent).map((content, i) => ({
+          id: streamPrefix + 'final-' + i,
+          role: 'assistant',
+          content,
+          created_at: new Date().toISOString(),
+        }));
+        const sourceMessages = savedMessages.length > 0 ? savedMessages : fallbackMessages;
+        const final = sourceMessages.map((m, i) => ({
           id: m.id,
           role: 'assistant',
           content: m.content,
