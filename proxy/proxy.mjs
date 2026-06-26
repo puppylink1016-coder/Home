@@ -208,12 +208,28 @@ const server = createServer(async (req, res) => {
       let inThinking = false;
       let sentRole = false;
       let sentResponseText = false;
+      let responseClosed = false;
+
+      function finishStream() {
+        if (responseClosed) return;
+        responseClosed = true;
+        clearInterval(keepAlive);
+        res.end();
+        try { child.kill(); } catch {}
+      }
+
+      function abortStream() {
+        clearInterval(keepAlive);
+        try { child.kill(); } catch {}
+      }
 
       child.stdout.on('data', (chunk) => {
+        if (responseClosed) return;
         buf += chunk.toString();
         const lines = buf.split('\n');
         buf = lines.pop();
         for (const line of lines) {
+          if (responseClosed) break;
           if (!line.trim()) continue;
           let ev;
           try { ev = JSON.parse(line); } catch { continue; }
@@ -251,13 +267,14 @@ const server = createServer(async (req, res) => {
             }
             sse({ id: chatId, object: 'chat.completion.chunk', choices: [{ index: 0, delta: {}, finish_reason: 'stop' }], usage: { prompt_tokens: ev.usage?.input_tokens || 0, completion_tokens: ev.usage?.output_tokens || 0 } });
             res.write('data: [DONE]\n\n');
+            finishStream();
           }
         }
       });
       child.stderr.on('data', () => {}); // handled in spawnClaude
-      child.on('close', () => { clearInterval(keepAlive); res.end(); });
-      child.on('error', () => { clearInterval(keepAlive); res.end(); });
-      req.on('close', () => { clearInterval(keepAlive); try { child.kill(); } catch {} });
+      child.on('close', finishStream);
+      child.on('error', finishStream);
+      res.on('close', () => { if (!responseClosed) abortStream(); });
 
     } else {
       let output = '';
@@ -314,12 +331,24 @@ const server = createServer(async (req, res) => {
       let blockIdx = 0;
       let buf = '';
       let sentTextDelta = false;
+      let responseClosed = false;
+      function finishStream() {
+        if (responseClosed) return;
+        responseClosed = true;
+        res.end();
+        try { child.kill(); } catch {}
+      }
+      function abortStream() {
+        try { child.kill(); } catch {}
+      }
       res.write(`event: message_start\ndata: ${JSON.stringify({type:"message_start",message:{id:msgId,type:"message",role:"assistant",content:[],model:model||"claude-sonnet-4-6",stop_reason:null,usage:{input_tokens:0,output_tokens:0}}})}\n\n`);
       child.stdout.on('data', (chunk) => {
+        if (responseClosed) return;
         buf += chunk.toString();
         const lines = buf.split('\n');
         buf = lines.pop();
         for (const line of lines) {
+          if (responseClosed) break;
           if (!line.trim()) continue;
           try {
             const ev = JSON.parse(line);
@@ -344,14 +373,15 @@ const server = createServer(async (req, res) => {
               }
               res.write(`event: message_delta\ndata: ${JSON.stringify({type:"message_delta",delta:{stop_reason:ev.stop_reason||"end_turn"},usage:{output_tokens:ev.usage?.output_tokens||0}})}\n\n`);
               res.write(`event: message_stop\ndata: ${JSON.stringify({type:"message_stop"})}\n\n`);
+              finishStream();
             }
           } catch {}
         }
       });
       child.stderr.on('data', () => {}); // handled in spawnClaude
-      child.on('close', () => { res.end(); });
-      child.on('error', () => { res.end(); });
-      req.on('close', () => { try { child.kill(); } catch {} });
+      child.on('close', finishStream);
+      child.on('error', finishStream);
+      res.on('close', () => { if (!responseClosed) abortStream(); });
     } else {
       let output = '';
       child.stdout.on('data', c => { output += c.toString(); });

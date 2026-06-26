@@ -1259,6 +1259,7 @@ app.post('/api/chat/stream', async (req, res) => {
       let phaseBuffer = '';
       const THINK_OPEN = '[THINKING]';
       const THINK_CLOSE = '[/THINKING]';
+      let streamEnded = false;
 
       function appendVisibleContent(text) {
         if (!text) return;
@@ -1331,7 +1332,10 @@ app.post('/api/chat/stream', async (req, res) => {
           const trimmed = line.trim();
           if (!trimmed || !trimmed.startsWith('data: ')) continue;
           const payload = trimmed.slice(6);
-          if (payload === '[DONE]') continue;
+          if (payload === '[DONE]') {
+            streamEnded = true;
+            break;
+          }
 
           let json;
           try { json = JSON.parse(payload); } catch { continue; }
@@ -1361,6 +1365,11 @@ app.post('/api/chat/stream', async (req, res) => {
               if (tc.function?.arguments) toolCallChunks[idx].arguments += tc.function.arguments;
             }
           }
+        }
+
+        if (streamEnded) {
+          console.log('[chat/stream] received [DONE], ending stream read');
+          break;
         }
       }
 
