@@ -1224,6 +1224,7 @@ app.post('/api/chat/stream', async (req, res) => {
         temperature: settings.temperature,
         max_tokens: settings.max_tokens,
         stream: true,
+        user: String(sessionId),
       };
 
       if (tools.length > 0) requestBody.tools = tools;
@@ -1603,7 +1604,8 @@ app.post('/api/chat', async (req, res) => {
       model: settings.model,
       messages: apiMessages,
       temperature: settings.temperature,
-      max_tokens: settings.max_tokens
+      max_tokens: settings.max_tokens,
+      user: String(sessionId)
     };
     if (tools.length > 0) {
       requestBody.tools = tools;
