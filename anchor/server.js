@@ -854,11 +854,13 @@ ${context.ombreDream || '无'}
 async function runMurmurClean({ force = false, push = true, source = 'heartbeat' } = {}) {
   const eligibility = await checkMurmurEligibility(force);
   if (!eligibility.ok) {
+    console.log(`[murmur:${source}] skipped by eligibility: ${eligibility.reason}`);
     return { skipped: true, reason: eligibility.reason };
   }
 
   const generated = await generateMurmurClean(force);
   if (generated.action !== 'send' || !generated.content) {
+    console.log(`[murmur:${source}] skipped by model: ${generated.reason || 'model skipped'}`, generated);
     return { skipped: true, reason: generated.reason || 'model skipped', generated };
   }
 
@@ -881,6 +883,7 @@ async function runMurmurClean({ force = false, push = true, source = 'heartbeat'
     .single();
   if (error) throw error;
 
+  console.log(`[murmur:${source}] saved: ${saved.id}, pushed=${pushResult.sent > 0}, sent=${pushResult.sent}`);
   return { skipped: false, murmur: saved, push: pushResult, generated };
 }
 
@@ -923,12 +926,28 @@ app.post('/api/heartbeat/run', async (req, res) => {
     if (!heartbeatAuthorized(req)) {
       return res.status(401).json({ error: 'Unauthorized' });
     }
+    const debug = req.query?.debug === '1' || req.body?.debug === true;
 
     const result = await runMurmurClean({
       force: false,
       push: req.body?.push !== false,
       source: 'heartbeat',
     });
+    if (debug) {
+      return res.json({
+        ok: !result.skipped,
+        skipped: result.skipped,
+        reason: result.reason || result.generated?.reason || null,
+        content: result.murmur?.content || null,
+        pushed: result.push?.sent > 0,
+        pushSent: result.push?.sent || 0,
+        generated: result.generated ? {
+          action: result.generated.action,
+          reason: result.generated.reason,
+          content: result.generated.content,
+        } : null,
+      });
+    }
     res.json({ ok: !result.skipped });
   } catch (err) {
     res.status(500).json({ error: err.message, hint: dataSetupHint(err) });

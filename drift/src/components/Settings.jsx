@@ -219,7 +219,7 @@ export default function Settings({ settings, onSave, onClose }) {
       const result = await api.runMurmur({ force: true, push: true, source: 'manual' });
       if (result.skipped) {
         setMurmurStatus(`这次没发：${result.reason || '模型选择跳过'}`);
-      } else if (result.push?.sent > 0) {
+      } else if (result.pushed || result.push?.sent > 0) {
         setMurmurStatus('已发到手机。');
       } else {
         setMurmurStatus('已生成，但没有可用通知订阅。');
