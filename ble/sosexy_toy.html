@@ -1,0 +1,294 @@
+<!DOCTYPE html>
+<html lang="zh">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<title>SOSEXY Bridge</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { font-family: -apple-system, sans-serif; background: #0a0a0a; color: #e0e0e0; padding: 20px; min-height: 100vh; }
+  .status { font-size: 14px; color: #666; margin-bottom: 16px; }
+  .status.connected { color: #4ade80; }
+  .status.error { color: #f87171; }
+  .motors { font-size: 13px; color: #888; margin-bottom: 12px; font-family: monospace; }
+  .motors span { margin-right: 16px; }
+  .motors .active { color: #c084fc; }
+  .log { font-family: monospace; font-size: 12px; color: #888; max-height: 50vh; overflow-y: auto; margin-top: 16px; padding: 12px; background: #111; border-radius: 8px; }
+  .log div { margin-bottom: 4px; }
+  .log .cmd { color: #c084fc; }
+  .log .err { color: #f87171; }
+  button { background: #222; color: #e0e0e0; border: 1px solid #333; border-radius: 8px; padding: 12px 24px; font-size: 16px; cursor: pointer; margin: 6px; }
+  button:active { background: #333; }
+  button:disabled { opacity: 0.3; }
+  .controls { margin-top: 12px; }
+  input { background: #111; color: #e0e0e0; border: 1px solid #333; border-radius: 8px; padding: 10px; font-size: 14px; width: 100%; margin-bottom: 8px; }
+</style>
+</head>
+<body>
+
+<div class="status" id="ble-status">蓝牙：未连接</div>
+<div class="status" id="poll-status">中继：未连接</div>
+<div class="motors" id="motor-display">
+  <span id="m-suction">吸吮 0</span>
+  <span id="m-vibration">震动 0</span>
+  <span id="m-electric">电击 0</span>
+</div>
+
+<button id="btn-connect" onclick="connectBLE()">连接 SOSEXY</button>
+<button id="btn-disconnect" onclick="disconnectBLE()" disabled>断开</button>
+
+<div class="controls">
+  <input id="url" type="text" placeholder="Anchor URL" value="https://anchor-uohz.onrender.com">
+  <input id="secret" type="password" placeholder="TOY_SECRET">
+  <button onclick="startPolling()">开始接收指令</button>
+  <button onclick="stopPolling()">停止</button>
+</div>
+
+<div class="log" id="log"></div>
+
+<script>
+const WRITE_UUID = '0000ee03-0000-1000-8000-00805f9b34fb';
+const NOTIFY_UUID = '0000ee02-0000-1000-8000-00805f9b34fb';
+const KEEPALIVE_MS = 1500;
+const POLL_MS = 300;
+const MAX_ELECTRIC = 100;
+
+const MOTORS = {
+  suction:   { byte5: 0x07, byte9: 0x08 },
+  vibration: { byte5: 0x01, byte9: 0x02 },
+  electric:  { byte5: 0x03, byte9: 0x04 },
+};
+
+let device = null;
+let server = null;
+let writeChar = null;
+let pollTimer = null;
+let keepaliveTimer = null;
+let currentUntil = 0;
+let motorState = { suction: 0, vibration: 0, electric: 0 };
+
+function log(msg, cls) {
+  const el = document.getElementById('log');
+  const d = document.createElement('div');
+  d.className = cls || '';
+  d.textContent = new Date().toLocaleTimeString() + ' ' + msg;
+  el.prepend(d);
+  if (el.children.length > 200) el.lastChild.remove();
+}
+
+function setStatus(id, text, cls) {
+  const el = document.getElementById(id);
+  el.textContent = text;
+  el.className = 'status ' + (cls || '');
+}
+
+function updateMotorDisplay() {
+  for (const name of Object.keys(MOTORS)) {
+    const el = document.getElementById('m-' + name);
+    const v = motorState[name];
+    const labels = { suction: '吸吮', vibration: '震动', electric: '电击' };
+    el.textContent = labels[name] + ' ' + v;
+    el.className = v > 0 ? 'active' : '';
+  }
+}
+
+function buildFrame(byte5, byte9, intensity) {
+  intensity = Math.max(0, Math.min(100, Math.round(intensity)));
+  return new Uint8Array([
+    0x01, 0x01, 0x00, 0x02, 0x00,
+    byte5, 0x11, intensity, 0x00,
+    byte9, 0x11, 0x01
+  ]);
+}
+
+function toIntensity(v) {
+  var num = parseFloat(v);
+  if (isNaN(num)) return 0;
+  if (num <= 1) num *= 100;
+  return Math.max(0, Math.min(100, Math.round(num)));
+}
+
+async function writeBLE(buf) {
+  if (!writeChar) return;
+  try {
+    await writeChar.writeValueWithoutResponse(buf);
+  } catch (e) {
+    log('写入失败: ' + e.message, 'err');
+  }
+}
+
+async function setMotor(name, level) {
+  var motor = MOTORS[name];
+  if (!motor) return;
+  if (name === 'electric') level = Math.min(MAX_ELECTRIC, level);
+  level = Math.max(0, Math.min(100, Math.round(level)));
+  motorState[name] = level;
+  await writeBLE(buildFrame(motor.byte5, motor.byte9, level));
+  updateMotorDisplay();
+}
+
+async function stopAll() {
+  for (var name of Object.keys(MOTORS)) {
+    motorState[name] = 0;
+    var motor = MOTORS[name];
+    await writeBLE(buildFrame(motor.byte5, motor.byte9, 0));
+  }
+  updateMotorDisplay();
+}
+
+async function connectBLE() {
+  try {
+    setStatus('ble-status', '蓝牙：扫描中...', '');
+
+    var serviceUUIDs = [
+      '0000ee00-0000-1000-8000-00805f9b34fb',
+      '0000ee01-0000-1000-8000-00805f9b34fb',
+      '0000ee02-0000-1000-8000-00805f9b34fb',
+      '0000ee03-0000-1000-8000-00805f9b34fb',
+    ];
+
+    device = await navigator.bluetooth.requestDevice({
+      filters: [{ name: 'SOSEXY' }],
+      optionalServices: serviceUUIDs
+    });
+
+    device.addEventListener('gattserverdisconnected', function() {
+      setStatus('ble-status', '蓝牙：已断开', 'error');
+      writeChar = null;
+      document.getElementById('btn-connect').disabled = false;
+      document.getElementById('btn-disconnect').disabled = true;
+      log('蓝牙断开');
+    });
+
+    server = await device.gatt.connect();
+
+    var foundService = null;
+    for (var uuid of serviceUUIDs) {
+      try {
+        foundService = await server.getPrimaryService(uuid);
+        log('服务: ' + uuid.slice(4, 8));
+        break;
+      } catch (e) {}
+    }
+
+    if (!foundService) {
+      throw new Error('未找到 BLE 服务，请检查设备');
+    }
+
+    writeChar = await foundService.getCharacteristic(WRITE_UUID);
+
+    try {
+      var notifyChar = await foundService.getCharacteristic(NOTIFY_UUID);
+      await notifyChar.startNotifications();
+    } catch (e) {}
+
+    setStatus('ble-status', '蓝牙：已连接 ' + device.name, 'connected');
+    document.getElementById('btn-connect').disabled = true;
+    document.getElementById('btn-disconnect').disabled = false;
+    log('已连接 ' + device.name);
+  } catch (e) {
+    setStatus('ble-status', '蓝牙：连接失败', 'error');
+    log('连接失败: ' + e.message, 'err');
+  }
+}
+
+function disconnectBLE() {
+  if (device && device.gatt.connected) device.gatt.disconnect();
+  writeChar = null;
+}
+
+function presetFromLegacy(cmd) {
+  var level = toIntensity(cmd.level != null ? cmd.level : (cmd.speed != null ? cmd.speed : 0.5));
+  var speed = toIntensity(cmd.speed != null ? cmd.speed : level / 100);
+  var pattern = parseInt(cmd.pattern) || 3;
+  var elec = Math.min(MAX_ELECTRIC, level);
+
+  var presets = {
+    1: { vibration: level },
+    2: { suction: speed },
+    3: { suction: speed, vibration: level },
+    4: { electric: elec },
+    5: { suction: speed, electric: elec },
+    6: { vibration: level, electric: elec },
+    7: { suction: speed, vibration: level, electric: elec },
+    8: { suction: 100, vibration: level, electric: elec },
+  };
+  return presets[pattern] || presets[3];
+}
+
+async function execCmd(c) {
+  if (c.stop) {
+    await stopAll();
+    currentUntil = 0;
+    log('停止', 'cmd');
+    return;
+  }
+
+  var motors = {};
+
+  if ('suction' in c || 'vibration' in c || 'electric' in c) {
+    if ('suction' in c) motors.suction = toIntensity(c.suction);
+    if ('vibration' in c) motors.vibration = toIntensity(c.vibration);
+    if ('electric' in c) motors.electric = toIntensity(c.electric);
+  } else {
+    motors = presetFromLegacy(c);
+  }
+
+  for (var name of Object.keys(motors)) {
+    await setMotor(name, motors[name]);
+  }
+
+  currentUntil = c.sec ? Date.now() + parseFloat(c.sec) * 1000 : 0;
+
+  var desc = Object.keys(motors).map(function(k) { return k + '=' + Math.round(motors[k]); }).join(' ');
+  log(desc, 'cmd');
+}
+
+function startPolling() {
+  var url = document.getElementById('url').value.replace(/\/+$/, '');
+  var secret = document.getElementById('secret').value;
+  if (!url) { log('请填写 Anchor URL', 'err'); return; }
+
+  stopPolling();
+  setStatus('poll-status', '中继：轮询中', 'connected');
+  log('开始轮询 ' + url);
+
+  pollTimer = setInterval(async function() {
+    try {
+      var headers = {};
+      if (secret) headers['x-bridge-secret'] = secret;
+      var r = await fetch(url + '/api/toy-next', { headers: headers });
+      if (r.ok) {
+        var c = await r.json();
+        if (c && Object.keys(c).length && c.type !== 'hello') {
+          await execCmd(c);
+        }
+      }
+    } catch (e) {}
+  }, POLL_MS);
+
+  keepaliveTimer = setInterval(async function() {
+    if (currentUntil && Date.now() >= currentUntil) {
+      currentUntil = 0;
+      await stopAll();
+      log('到时自动停', 'cmd');
+      return;
+    }
+    for (var name of Object.keys(MOTORS)) {
+      if (motorState[name] > 0) {
+        var motor = MOTORS[name];
+        await writeBLE(buildFrame(motor.byte5, motor.byte9, motorState[name]));
+      }
+    }
+  }, KEEPALIVE_MS);
+}
+
+function stopPolling() {
+  if (pollTimer) { clearInterval(pollTimer); pollTimer = null; }
+  if (keepaliveTimer) { clearInterval(keepaliveTimer); keepaliveTimer = null; }
+  setStatus('poll-status', '中继：已停止', '');
+  currentUntil = 0;
+}
+</script>
+</body>
+</html>
