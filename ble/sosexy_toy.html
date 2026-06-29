@@ -111,7 +111,11 @@ function toIntensity(v) {
 async function writeBLE(buf) {
   if (!writeChar) return;
   try {
-    await writeChar.writeValueWithoutResponse(buf);
+    if (writeChar.properties.write) {
+      await writeChar.writeValueWithResponse(buf);
+    } else {
+      await writeChar.writeValueWithoutResponse(buf);
+    }
   } catch (e) {
     log('写入失败: ' + e.message, 'err');
   }
@@ -163,19 +167,24 @@ async function connectBLE() {
     server = await device.gatt.connect();
 
     var foundService = null;
+    writeChar = null;
     for (var uuid of serviceUUIDs) {
       try {
-        foundService = await server.getPrimaryService(uuid);
-        log('服务: ' + uuid.slice(4, 8));
-        break;
+        var svc = await server.getPrimaryService(uuid);
+        try {
+          writeChar = await svc.getCharacteristic(WRITE_UUID);
+          foundService = svc;
+          log('服务: ' + uuid.slice(4, 8) + ' (含写入)', 'cmd');
+          break;
+        } catch (e2) {
+          log('服务 ' + uuid.slice(4, 8) + ' 无写入特征');
+        }
       } catch (e) {}
     }
 
-    if (!foundService) {
-      throw new Error('未找到 BLE 服务，请检查设备');
+    if (!foundService || !writeChar) {
+      throw new Error('未找到含写入特征的 BLE 服务');
     }
-
-    writeChar = await foundService.getCharacteristic(WRITE_UUID);
 
     try {
       var notifyChar = await foundService.getCharacteristic(NOTIFY_UUID);
