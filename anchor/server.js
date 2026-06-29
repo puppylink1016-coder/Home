@@ -2002,9 +2002,6 @@ app.post('/api/toy-cmd', (req, res) => {
   res.json({ ok: true, cmd });
 });
 
-const path = require('path');
-app.use('/ble', express.static(path.join(__dirname, '..', 'ble')));
-
 app.listen(PORT, () => {
   console.log(`Anchor listening on port ${PORT}`);
 });
