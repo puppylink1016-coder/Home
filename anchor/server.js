@@ -593,8 +593,8 @@ function stripToyMarkupAndQueue(text, source) {
 const MURMUR_DAILY_LIMIT = parseInt(process.env.MURMUR_DAILY_LIMIT || '6', 10);
 const MURMUR_MIN_INTERVAL_MINUTES = parseInt(process.env.MURMUR_MIN_INTERVAL_MINUTES || '90', 10);
 const MURMUR_USER_COOLDOWN_MINUTES = parseInt(process.env.MURMUR_USER_COOLDOWN_MINUTES || '30', 10);
-const MURMUR_QUIET_START = parseInt(process.env.MURMUR_QUIET_START || '1', 10);
-const MURMUR_QUIET_END = parseInt(process.env.MURMUR_QUIET_END || '8', 10);
+const MURMUR_QUIET_START = parseInt(process.env.MURMUR_QUIET_START || '0', 10);
+const MURMUR_QUIET_END = parseInt(process.env.MURMUR_QUIET_END || '0', 10);
 const MURMUR_TZ_OFFSET_MINUTES = parseInt(process.env.MURMUR_TZ_OFFSET_MINUTES || '480', 10);
 const HEARTBEAT_SECRET = process.env.HEARTBEAT_SECRET || '';
 
