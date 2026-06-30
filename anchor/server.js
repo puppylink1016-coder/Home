@@ -836,7 +836,7 @@ async function generateMurmurClean(force = false) {
 - 如果适合，action 写 "send"，content 写 12-45 个中文字符。
 - content 是直接推送给昭昭看的，不要解释系统规则。
 - thinking 只写一句内部理由，不超过 80 字。
-${force ? '这次是昭昭手动测试，可以倾向发送一条。' : '这次是后台心跳检查，可以选择不发送。'}
+${force ? '这次是昭昭手动测试，必须 action 写 "send"，除非最近上下文明确危险或绝对不适合。' : '这次是后台心跳检查，可以选择不发送。'}
 
 最近对话：
 ${recentText || '无'}
@@ -938,6 +938,10 @@ app.post('/api/murmurs/run', async (req, res) => {
       reason: result.reason || result.generated?.reason,
       content: result.murmur?.content || null,
       pushed: result.push?.sent > 0,
+      pushSent: result.push?.sent || 0,
+      push: result.push || { sent: 0, results: [] },
+      murmur: result.murmur || null,
+      generated: result.generated || null,
     });
   } catch (err) {
     res.status(500).json({ error: err.message, hint: dataSetupHint(err) });

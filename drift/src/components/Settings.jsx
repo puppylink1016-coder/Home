@@ -222,7 +222,11 @@ export default function Settings({ settings, onSave, onClose }) {
       } else if (result.pushed || result.push?.sent > 0) {
         setMurmurStatus('已发到手机。');
       } else {
-        setMurmurStatus('已生成，但没有可用通知订阅。');
+        const pushError = result.push?.results?.find((item) => item?.error)?.error;
+        const content = result.content || result.murmur?.content || result.generated?.content;
+        setMurmurStatus(content
+          ? `已生成：${content}${pushError ? `（未推送：${pushError}）` : '（没有可用通知订阅）'}`
+          : `已生成，但未推送${pushError ? `：${pushError}` : '。'}`);
       }
       await loadMurmurs({ silent: true });
     } catch (err) {

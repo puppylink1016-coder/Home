@@ -24,10 +24,40 @@ function splitStreamingContent(content) {
     ? normalized.slice(0, -pendingLength)
     : normalized;
 
-  return safeContent
+  const markerParts = safeContent
     .split(STREAM_SPLIT_MARKER)
     .map((part) => part.trim())
     .filter(Boolean);
+  if (markerParts.length > 1) return markerParts;
+
+  const clean = safeContent.trim();
+  if (!clean) return [];
+
+  const paragraphParts = clean.split(/\n{2,}/).map((part) => part.trim()).filter(Boolean);
+  if (paragraphParts.length > 1) return paragraphParts;
+
+  const lineParts = clean.split('\n').map((part) => part.trim()).filter(Boolean);
+  if (lineParts.length >= 3 && lineParts.every((part) => part.length <= 140)) return lineParts;
+
+  if (/```|^\s*[-*]\s|^\s*\d+\./m.test(clean)) return [clean];
+
+  const sentenceParts = clean.match(/[^。！？!?]+[。！？!?]+|[^。！？!?]+$/g)
+    ?.map((part) => part.trim())
+    .filter(Boolean) || [];
+  if (sentenceParts.length < 4) return [clean];
+
+  const grouped = [];
+  let bucket = '';
+  for (const sentence of sentenceParts) {
+    if (bucket && bucket.length + sentence.length > 72) {
+      grouped.push(bucket);
+      bucket = sentence;
+    } else {
+      bucket += sentence;
+    }
+  }
+  if (bucket) grouped.push(bucket);
+  return grouped.length > 1 ? grouped : [clean];
 }
 
 function App() {
