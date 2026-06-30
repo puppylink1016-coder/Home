@@ -106,14 +106,17 @@ function getLatestUserPrompt(messages = []) {
 }
 
 function getClaudeSessionId(ev) {
-  return ev?.session_id || ev?.sessionId || ev?.session?.id || ev?.metadata?.session_id || '';
+  if (!ev) return '';
+  const id = ev.session_id || ev.sessionId || ev.session?.id || ev.metadata?.session_id || ev.conversation_id || '';
+  return String(id || '');
 }
 
 function rememberClaudeSession(key, ev, systemPrompt, model) {
   if (!key) return;
   const sessionId = getClaudeSessionId(ev);
   if (!sessionId) {
-    console.log(`[proxy] session NOT captured for key: ${key} — CLI output missing session_id`);
+    const evKeys = ev ? Object.keys(ev).join(',') : '(null)';
+    console.log(`[proxy] session NOT captured for key: ${key} — result keys: [${evKeys}]`);
     return;
   }
   const isNew = !sessionStore[key] || sessionStore[key].sessionId !== sessionId;
@@ -254,56 +257,63 @@ const server = createServer(async (req, res) => {
         try { child.kill(); } catch {}
       }
 
+      function processLine(line) {
+        if (responseClosed) return;
+        if (!line.trim()) return;
+        let ev;
+        try { ev = JSON.parse(line); } catch { return; }
+
+        const se = ev.type === 'stream_event' ? (ev.event || {}) : ev;
+        if (se.type === 'content_block_start') {
+          const cb = se.content_block || {};
+          inThinking = cb.type === 'thinking';
+          if (inThinking) {
+            sse({ id: chatId, object: 'chat.completion.chunk', choices: [{ index: 0, delta: sentRole ? { content: '[THINKING]' } : { role: 'assistant', content: '[THINKING]' }, finish_reason: null }] });
+            sentRole = true;
+          } else if (!sentRole) {
+            sse({ id: chatId, object: 'chat.completion.chunk', choices: [{ index: 0, delta: { role: 'assistant', content: '' }, finish_reason: null }] });
+            sentRole = true;
+          }
+        } else if (se.type === 'content_block_delta') {
+          const d = se.delta || {};
+          if (d.thinking) {
+            sse({ id: chatId, object: 'chat.completion.chunk', choices: [{ index: 0, delta: { content: d.thinking }, finish_reason: null }] });
+          }
+          if (d.text) {
+            sse({ id: chatId, object: 'chat.completion.chunk', choices: [{ index: 0, delta: { content: d.text }, finish_reason: null }] });
+            sentResponseText = true;
+          }
+        } else if (se.type === 'content_block_stop') {
+          if (inThinking) {
+            sse({ id: chatId, object: 'chat.completion.chunk', choices: [{ index: 0, delta: { content: '[/THINKING]' }, finish_reason: null }] });
+            inThinking = false;
+          }
+        } else if (ev.type === 'result') {
+          rememberClaudeSession(conversationKey, ev, system, model);
+          if (ev.result && !sentResponseText) {
+            sse({ id: chatId, object: 'chat.completion.chunk', choices: [{ index: 0, delta: sentRole ? { content: ev.result } : { role: 'assistant', content: ev.result }, finish_reason: null }] });
+            sentRole = true;
+          }
+          sse({ id: chatId, object: 'chat.completion.chunk', choices: [{ index: 0, delta: {}, finish_reason: 'stop' }], usage: { prompt_tokens: ev.usage?.input_tokens || 0, completion_tokens: ev.usage?.output_tokens || 0 } });
+          res.write('data: [DONE]\n\n');
+          finishStream();
+        }
+      }
+
       child.stdout.on('data', (chunk) => {
         if (responseClosed) return;
         buf += chunk.toString();
         const lines = buf.split('\n');
         buf = lines.pop();
         for (const line of lines) {
-          if (responseClosed) break;
-          if (!line.trim()) continue;
-          let ev;
-          try { ev = JSON.parse(line); } catch { continue; }
-
-          const se = ev.type === 'stream_event' ? (ev.event || {}) : ev;
-          if (se.type === 'content_block_start') {
-            const cb = se.content_block || {};
-            inThinking = cb.type === 'thinking';
-            if (inThinking) {
-              sse({ id: chatId, object: 'chat.completion.chunk', choices: [{ index: 0, delta: sentRole ? { content: '[THINKING]' } : { role: 'assistant', content: '[THINKING]' }, finish_reason: null }] });
-              sentRole = true;
-            } else if (!sentRole) {
-              sse({ id: chatId, object: 'chat.completion.chunk', choices: [{ index: 0, delta: { role: 'assistant', content: '' }, finish_reason: null }] });
-              sentRole = true;
-            }
-          } else if (se.type === 'content_block_delta') {
-            const d = se.delta || {};
-            if (d.thinking) {
-              sse({ id: chatId, object: 'chat.completion.chunk', choices: [{ index: 0, delta: { content: d.thinking }, finish_reason: null }] });
-            }
-            if (d.text) {
-              sse({ id: chatId, object: 'chat.completion.chunk', choices: [{ index: 0, delta: { content: d.text }, finish_reason: null }] });
-              sentResponseText = true;
-            }
-          } else if (se.type === 'content_block_stop') {
-            if (inThinking) {
-              sse({ id: chatId, object: 'chat.completion.chunk', choices: [{ index: 0, delta: { content: '[/THINKING]' }, finish_reason: null }] });
-              inThinking = false;
-            }
-          } else if (ev.type === 'result') {
-            rememberClaudeSession(conversationKey, ev, system, model);
-            if (ev.result && !sentResponseText) {
-              sse({ id: chatId, object: 'chat.completion.chunk', choices: [{ index: 0, delta: sentRole ? { content: ev.result } : { role: 'assistant', content: ev.result }, finish_reason: null }] });
-              sentRole = true;
-            }
-            sse({ id: chatId, object: 'chat.completion.chunk', choices: [{ index: 0, delta: {}, finish_reason: 'stop' }], usage: { prompt_tokens: ev.usage?.input_tokens || 0, completion_tokens: ev.usage?.output_tokens || 0 } });
-            res.write('data: [DONE]\n\n');
-            finishStream();
-          }
+          processLine(line);
         }
       });
       child.stderr.on('data', () => {}); // handled in spawnClaude
-      child.on('close', finishStream);
+      child.on('close', () => {
+        if (buf.trim()) processLine(buf);
+        finishStream();
+      });
       child.on('error', finishStream);
       res.on('close', () => { if (!responseClosed) abortStream(); });
 
