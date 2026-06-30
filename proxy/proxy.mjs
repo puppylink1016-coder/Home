@@ -112,7 +112,11 @@ function getClaudeSessionId(ev) {
 function rememberClaudeSession(key, ev, systemPrompt, model) {
   if (!key) return;
   const sessionId = getClaudeSessionId(ev);
-  if (!sessionId) return;
+  if (!sessionId) {
+    console.log(`[proxy] session NOT captured for key: ${key} — CLI output missing session_id`);
+    return;
+  }
+  const isNew = !sessionStore[key] || sessionStore[key].sessionId !== sessionId;
   sessionStore[key] = {
     sessionId,
     model: normalizeModel(model) || 'claude-sonnet-4-6',
@@ -120,6 +124,8 @@ function rememberClaudeSession(key, ev, systemPrompt, model) {
     updatedAt: new Date().toISOString(),
   };
   saveSessionStore();
+  const u = ev?.usage || {};
+  console.log(`[proxy] session ${isNew ? 'STORED' : 'updated'} | key: ${key} | sid: ${sessionId.slice(0, 12)}... | input: ${u.input_tokens || '?'} | output: ${u.output_tokens || '?'} | cache_read: ${u.cache_read_input_tokens ?? u.cache_read ?? '?'} | cache_create: ${u.cache_creation_input_tokens ?? u.cache_create ?? '?'}`);
 }
 
 function clearClaudeSession(key) {
@@ -133,6 +139,9 @@ function prepareClaudeTurn({ systemPrompt, fullPrompt, latestPrompt, model, conv
 
   const stored = conversationKey ? sessionStore[conversationKey] : null;
   const resumeSessionId = RESUME_SESSIONS ? stored?.sessionId : '';
+
+  const resuming = !!resumeSessionId;
+  console.log(`[proxy] prepare | key: ${conversationKey || '(none)'} | resume: ${resuming ? 'YES ' + resumeSessionId.slice(0, 12) + '...' : 'NO (new session)'} | full: ${fullPrompt.length} chars | latest: ${latestPrompt?.length || 0} chars | system: ${systemPrompt?.length || 0} chars${resuming ? ' (skipped)' : ''}`);
 
   return {
     systemPrompt: resumeSessionId ? '' : systemPrompt,
@@ -406,12 +415,19 @@ const server = createServer(async (req, res) => {
   }
 
   if (req.url === '/health') {
+    const sessions = Object.entries(sessionStore).map(([k, v]) => ({
+      key: k,
+      sessionId: v.sessionId?.slice(0, 12) + '...',
+      model: v.model,
+      updatedAt: v.updatedAt,
+    }));
     res.writeHead(200, { 'Content-Type': 'application/json' });
     res.end(JSON.stringify({
       status: 'ok',
       service: 'claude-proxy',
       resume_sessions: RESUME_SESSIONS,
       stored_sessions: Object.keys(sessionStore).length,
+      sessions,
     }));
     return;
   }
