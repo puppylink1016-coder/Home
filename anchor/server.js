@@ -868,7 +868,7 @@ ${context.ombreDream || '无'}
 
   const data = await response.json();
   if (!response.ok) {
-    throw new Error(data.error?.message || `LLM returned ${response.status}`);
+    throw new Error(data.error?.message || `Aux LLM returned ${response.status}`);
   }
 
   return parseMurmurJson(data.choices?.[0]?.message?.content || '', force);
