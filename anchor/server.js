@@ -124,6 +124,11 @@ function enqueueToyCommand(input, source = 'unknown') {
 const LLM_BASE_URL = process.env.LLM_BASE_URL || 'https://openrouter.ai/api/v1/chat/completions';
 const LLM_API_KEY = process.env.LLM_API_KEY || process.env.OPENROUTER_API_KEY || '';
 
+// Auxiliary LLM for non-chat tasks (murmurs, compression) — separate from main chat to avoid burning Claude subscription credits
+const AUX_LLM_BASE_URL = process.env.AUX_LLM_BASE_URL || 'https://openrouter.ai/api/v1/chat/completions';
+const AUX_LLM_API_KEY = process.env.AUX_LLM_API_KEY || process.env.OPENROUTER_API_KEY || '';
+const AUX_MURMUR_MODEL = process.env.AUX_MURMUR_MODEL || 'deepseek/deepseek-chat';
+
 const VAPID_PUBLIC_KEY = process.env.VAPID_PUBLIC_KEY || '';
 const VAPID_PRIVATE_KEY = process.env.VAPID_PRIVATE_KEY || '';
 const VAPID_SUBJECT = process.env.VAPID_SUBJECT || 'mailto:drift@example.com';
@@ -798,7 +803,7 @@ function parseMurmurJson(raw, force) {
 
 async function generateMurmurClean(force = false) {
   const context = await getMurmurContext();
-  const model = context.settings.model || 'anthropic/claude-sonnet-4-6';
+  const model = AUX_MURMUR_MODEL;
   const temperature = context.settings.temperature ?? 0.85;
 
   const coreText = context.coreMemories.map((m) => m.summary).join('\n');
@@ -826,10 +831,10 @@ ${context.ombreDream || '无'}
 
 只输出 JSON：{"action":"send|skip","thinking":"...","content":"...","reason":"..."}`;
 
-  const response = await fetch(LLM_BASE_URL, {
+  const response = await fetch(AUX_LLM_BASE_URL, {
     method: 'POST',
     headers: {
-      'Authorization': `Bearer ${LLM_API_KEY}`,
+      'Authorization': `Bearer ${AUX_LLM_API_KEY}`,
       'Content-Type': 'application/json'
     },
     body: JSON.stringify({
@@ -845,7 +850,7 @@ ${context.ombreDream || '无'}
 
   const data = await response.json();
   if (!response.ok) {
-    throw new Error(data.error?.message || `LLM returned ${response.status}`);
+    throw new Error(data.error?.message || `Aux LLM returned ${response.status}`);
   }
 
   return parseMurmurJson(data.choices?.[0]?.message?.content || '', force);
@@ -1773,10 +1778,10 @@ async function compress(sessionId, settings) {
     .map(m => `${m.role}: ${m.content}`)
     .join('\n');
 
-  const response = await fetch(LLM_BASE_URL, {
+  const response = await fetch(AUX_LLM_BASE_URL, {
     method: 'POST',
     headers: {
-      'Authorization': `Bearer ${LLM_API_KEY}`,
+      'Authorization': `Bearer ${AUX_LLM_API_KEY}`,
       'Content-Type': 'application/json'
     },
     body: JSON.stringify({
