@@ -1198,7 +1198,7 @@ app.post('/api/chat/stream', async (req, res) => {
       ombreMemories = await callOmbreTool('breath', { query: message });
     }
 
-    const thinkingInstruction = '在每次回复的最开头，用[THINKING]和[/THINKING]包裹你的内心独白，必须使用中文，以第一人称视角。[/THINKING]之后写正式回复。';
+    const thinkingInstruction = '在每次回复的最开头，用[THINKING]和[/THINKING]包裹你的内心独白。思考内容必须全部使用中文书写，以第一人称视角，绝对不要用英文思考。[/THINKING]之后写正式回复。';
     const systemParts = [thinkingInstruction, settings.system_prompt || '', RESPONSE_SPLIT_INSTRUCTION];
     if (TOY_SECRET) systemParts.push(TOY_TRIGGER_INSTRUCTION);
     if (OMBRE_BRAIN_URL) systemParts.push(MEMORY_SAVE_INSTRUCTION);
@@ -1601,8 +1601,11 @@ app.post('/api/chat', async (req, res) => {
     }
 
     // Build messages array for API
-    let systemContent = settings.system_prompt || '';
-    if (OMBRE_BRAIN_URL) systemContent += '\n\n' + MEMORY_SAVE_INSTRUCTION;
+    const thinkingInstruction = '在每次回复的最开头，用[THINKING]和[/THINKING]包裹你的内心独白。思考内容必须全部使用中文书写，以第一人称视角，绝对不要用英文思考。[/THINKING]之后写正式回复。';
+    const systemParts = [thinkingInstruction, settings.system_prompt || '', RESPONSE_SPLIT_INSTRUCTION];
+    if (TOY_SECRET) systemParts.push(TOY_TRIGGER_INSTRUCTION);
+    if (OMBRE_BRAIN_URL) systemParts.push(MEMORY_SAVE_INSTRUCTION);
+    let systemContent = systemParts.filter(Boolean).join('\n\n');
 
     // Add Ombre Brain memories (semantic, relevant to current message)
     if (ombreMemories) {

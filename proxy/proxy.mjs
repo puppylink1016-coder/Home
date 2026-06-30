@@ -138,7 +138,16 @@ function prepareClaudeTurn({ systemPrompt, fullPrompt, latestPrompt, model, conv
   if (resetSession) clearClaudeSession(conversationKey);
 
   const stored = conversationKey ? sessionStore[conversationKey] : null;
-  const resumeSessionId = RESUME_SESSIONS ? stored?.sessionId : '';
+  let resumeSessionId = RESUME_SESSIONS ? stored?.sessionId : '';
+
+  if (resumeSessionId && stored?.systemHash && systemPrompt) {
+    const currentHash = hashText(systemPrompt);
+    if (currentHash !== stored.systemHash) {
+      console.log(`[proxy] system prompt changed for key: ${conversationKey} — invalidating old session`);
+      clearClaudeSession(conversationKey);
+      resumeSessionId = '';
+    }
+  }
 
   const resuming = !!resumeSessionId;
   console.log(`[proxy] prepare | key: ${conversationKey || '(none)'} | resume: ${resuming ? 'YES ' + resumeSessionId.slice(0, 12) + '...' : 'NO (new session)'} | full: ${fullPrompt.length} chars | latest: ${latestPrompt?.length || 0} chars | system: ${systemPrompt?.length || 0} chars${resuming ? ' (skipped)' : ''}`);
@@ -419,6 +428,7 @@ const server = createServer(async (req, res) => {
       key: k,
       sessionId: v.sessionId?.slice(0, 12) + '...',
       model: v.model,
+      systemHash: v.systemHash?.slice(0, 8) + '...',
       updatedAt: v.updatedAt,
     }));
     res.writeHead(200, { 'Content-Type': 'application/json' });
@@ -429,6 +439,17 @@ const server = createServer(async (req, res) => {
       stored_sessions: Object.keys(sessionStore).length,
       sessions,
     }));
+    return;
+  }
+
+  if (req.url === '/clear-sessions' && req.method === 'POST') {
+    if (!checkAuth(req, CORS, res)) return;
+    const count = Object.keys(sessionStore).length;
+    for (const k of Object.keys(sessionStore)) delete sessionStore[k];
+    saveSessionStore();
+    console.log(`[proxy] cleared all ${count} sessions`);
+    res.writeHead(200, { ...CORS, 'Content-Type': 'application/json' });
+    res.end(JSON.stringify({ cleared: count }));
     return;
   }
 
