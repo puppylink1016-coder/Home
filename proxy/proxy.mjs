@@ -202,9 +202,6 @@ function prepareClaudeTurn({ systemPrompt, fullPrompt, latestPrompt, model, conv
 
   console.log(`[proxy] prepare | key: ${conversationKey || '(none)'} | resume: ${resuming ? 'YES ' + resumeSessionId.slice(0, 12) + '...' : 'NO (new session)'} | full: ${fullPrompt.length} chars | latest: ${latestPrompt?.length || 0} chars | stable_system: ${systemPrompt?.length || 0} chars${resuming ? ' (skipped)' : ''}${stableSystemChanged ? ' | STABLE SYSTEM UPDATE INJECTED' : ''}`);
 
-  const resuming = !!resumeSessionId;
-  console.log(`[proxy] prepare | key: ${conversationKey || '(none)'} | resume: ${resuming ? 'YES ' + resumeSessionId.slice(0, 12) + '...' : 'NO (new session)'} | full: ${fullPrompt.length} chars | latest: ${latestPrompt?.length || 0} chars | system: ${systemPrompt?.length || 0} chars${resuming ? ' (skipped)' : ''}`);
-
   return {
     systemPrompt: resumeSessionId ? '' : systemPrompt,
     userPrompt,
