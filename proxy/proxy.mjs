@@ -13,6 +13,12 @@ const SESSION_STORE_PATH = resolve(
   process.env.CLAUDE_SESSION_STORE || './.claude-proxy-sessions.json'
 );
 
+const DYNAMIC_SYSTEM_MARKERS = [
+  '\n\n【此刻】',
+  '\n\n## 相关记忆（语义检索）',
+  '\n\n## 长期记忆',
+];
+
 function readBody(req) {
   return new Promise((res, rej) => {
     const chunks = []; req.on('data', c => chunks.push(c)); req.on('end', () => res(Buffer.concat(chunks).toString())); req.on('error', rej);
@@ -105,14 +111,49 @@ function getLatestUserPrompt(messages = []) {
   return '';
 }
 
+function splitSystemPrompt(systemPrompt = '') {
+  const text = String(systemPrompt || '');
+  let dynamicStart = -1;
+
+  for (const marker of DYNAMIC_SYSTEM_MARKERS) {
+    const idx = text.indexOf(marker);
+    if (idx !== -1 && (dynamicStart === -1 || idx < dynamicStart)) {
+      dynamicStart = idx;
+    }
+  }
+
+  if (dynamicStart === -1) {
+    return { stableSystemPrompt: text.trim(), dynamicContext: '' };
+  }
+
+  return {
+    stableSystemPrompt: text.slice(0, dynamicStart).trim(),
+    dynamicContext: text.slice(dynamicStart).trim(),
+  };
+}
+
+function attachDynamicContext(dynamicContext, prompt = '') {
+  const promptText = String(prompt || '');
+  const contextText = String(dynamicContext || '').trim();
+  if (!contextText) return promptText;
+  return `[本轮动态上下文]\n${contextText}\n[动态上下文结束]\n\n${promptText}`;
+}
+
 function getClaudeSessionId(ev) {
-  return ev?.session_id || ev?.sessionId || ev?.session?.id || ev?.metadata?.session_id || '';
+  if (!ev) return '';
+  const id = ev.session_id || ev.sessionId || ev.session?.id || ev.metadata?.session_id || ev.conversation_id || '';
+  return String(id || '');
 }
 
 function rememberClaudeSession(key, ev, systemPrompt, model) {
   if (!key) return;
   const sessionId = getClaudeSessionId(ev);
-  if (!sessionId) return;
+  if (!sessionId) {
+    const evKeys = ev ? Object.keys(ev).join(',') : '(null)';
+    console.log(`[proxy] session NOT captured for key: ${key} - result keys: [${evKeys}]`);
+    return;
+  }
+  const isNew = !sessionStore[key] || sessionStore[key].sessionId !== sessionId;
   sessionStore[key] = {
     sessionId,
     model: normalizeModel(model) || 'claude-sonnet-4-6',
@@ -120,6 +161,8 @@ function rememberClaudeSession(key, ev, systemPrompt, model) {
     updatedAt: new Date().toISOString(),
   };
   saveSessionStore();
+  const u = ev?.usage || {};
+  console.log(`[proxy] session ${isNew ? 'STORED' : 'updated'} | key: ${key} | sid: ${sessionId.slice(0, 12)}... | input: ${u.input_tokens || '?'} | output: ${u.output_tokens || '?'} | cache_read: ${u.cache_read_input_tokens ?? u.cache_read ?? '?'} | cache_create: ${u.cache_creation_input_tokens ?? u.cache_create ?? '?'}`);
 }
 
 function clearClaudeSession(key) {
@@ -132,11 +175,36 @@ function prepareClaudeTurn({ systemPrompt, fullPrompt, latestPrompt, model, conv
   if (resetSession) clearClaudeSession(conversationKey);
 
   const stored = conversationKey ? sessionStore[conversationKey] : null;
-  const resumeSessionId = RESUME_SESSIONS ? stored?.sessionId : '';
+  let resumeSessionId = RESUME_SESSIONS ? stored?.sessionId : '';
+
+  let stableSystemChanged = false;
+  if (resumeSessionId && stored?.systemHash && systemPrompt) {
+    const currentHash = hashText(systemPrompt);
+    if (currentHash !== stored.systemHash) {
+      console.log(`[proxy] stable system prompt changed for key: ${conversationKey} - injecting update (keeping session for context)`);
+      stableSystemChanged = true;
+      stored.systemHash = currentHash;
+      saveSessionStore();
+    }
+  }
+
+  const resuming = !!resumeSessionId;
+
+  let userPrompt;
+  if (resumeSessionId) {
+    const base = latestPrompt || fullPrompt;
+    userPrompt = stableSystemChanged
+      ? `[稳定系统指令已更新，从现在起遵循以下指令]\n${systemPrompt}\n[更新结束]\n\n${base}`
+      : base;
+  } else {
+    userPrompt = fullPrompt;
+  }
+
+  console.log(`[proxy] prepare | key: ${conversationKey || '(none)'} | resume: ${resuming ? 'YES ' + resumeSessionId.slice(0, 12) + '...' : 'NO (new session)'} | full: ${fullPrompt.length} chars | latest: ${latestPrompt?.length || 0} chars | stable_system: ${systemPrompt?.length || 0} chars${resuming ? ' (skipped)' : ''}${stableSystemChanged ? ' | STABLE SYSTEM UPDATE INJECTED' : ''}`);
 
   return {
     systemPrompt: resumeSessionId ? '' : systemPrompt,
-    userPrompt: resumeSessionId && latestPrompt ? latestPrompt : fullPrompt,
+    userPrompt,
     resumeSessionId,
   };
 }
@@ -183,15 +251,18 @@ const server = createServer(async (req, res) => {
     const body = JSON.parse(await readBody(req));
     console.log(`[proxy] /v1/chat/completions | model: ${body.model} | stream: ${body.stream} | msgs: ${body.messages?.length}`);
     const { system, prompt } = openaiMessagesToPrompt(body.messages);
+    const { stableSystemPrompt, dynamicContext } = splitSystemPrompt(system);
+    const fullPrompt = attachDynamicContext(dynamicContext, prompt);
+    const latestPrompt = attachDynamicContext(dynamicContext, getLatestUserPrompt(body.messages));
     const isStream = body.stream === true;
     const model = body.model || '';
     const chatId = `chatcmpl-${Date.now()}`;
     const conversationKey = getConversationKey(body, req);
     const resetSession = body.metadata?.reset_claude_session === true || req.headers['x-claude-reset-session'] === '1';
     const turn = prepareClaudeTurn({
-      systemPrompt: system,
-      fullPrompt: prompt,
-      latestPrompt: getLatestUserPrompt(body.messages),
+      systemPrompt: stableSystemPrompt,
+      fullPrompt,
+      latestPrompt,
       model,
       conversationKey,
       resetSession,
@@ -223,6 +294,49 @@ const server = createServer(async (req, res) => {
         try { child.kill(); } catch {}
       }
 
+      function processLine(line) {
+        if (responseClosed) return;
+        if (!line.trim()) return;
+        let ev;
+        try { ev = JSON.parse(line); } catch { return; }
+
+        const se = ev.type === 'stream_event' ? (ev.event || {}) : ev;
+        if (se.type === 'content_block_start') {
+          const cb = se.content_block || {};
+          inThinking = cb.type === 'thinking';
+          if (inThinking) {
+            sse({ id: chatId, object: 'chat.completion.chunk', choices: [{ index: 0, delta: sentRole ? { content: '[THINKING]' } : { role: 'assistant', content: '[THINKING]' }, finish_reason: null }] });
+            sentRole = true;
+          } else if (!sentRole) {
+            sse({ id: chatId, object: 'chat.completion.chunk', choices: [{ index: 0, delta: { role: 'assistant', content: '' }, finish_reason: null }] });
+            sentRole = true;
+          }
+        } else if (se.type === 'content_block_delta') {
+          const d = se.delta || {};
+          if (d.thinking) {
+            sse({ id: chatId, object: 'chat.completion.chunk', choices: [{ index: 0, delta: { content: d.thinking }, finish_reason: null }] });
+          }
+          if (d.text) {
+            sse({ id: chatId, object: 'chat.completion.chunk', choices: [{ index: 0, delta: { content: d.text }, finish_reason: null }] });
+            sentResponseText = true;
+          }
+        } else if (se.type === 'content_block_stop') {
+          if (inThinking) {
+            sse({ id: chatId, object: 'chat.completion.chunk', choices: [{ index: 0, delta: { content: '[/THINKING]' }, finish_reason: null }] });
+            inThinking = false;
+          }
+        } else if (ev.type === 'result') {
+          rememberClaudeSession(conversationKey, ev, stableSystemPrompt, model);
+          if (ev.result && !sentResponseText) {
+            sse({ id: chatId, object: 'chat.completion.chunk', choices: [{ index: 0, delta: sentRole ? { content: ev.result } : { role: 'assistant', content: ev.result }, finish_reason: null }] });
+            sentRole = true;
+          }
+          sse({ id: chatId, object: 'chat.completion.chunk', choices: [{ index: 0, delta: {}, finish_reason: 'stop' }], usage: { prompt_tokens: ev.usage?.input_tokens || 0, completion_tokens: ev.usage?.output_tokens || 0 } });
+          res.write('data: [DONE]\n\n');
+          finishStream();
+        }
+      }
+
       child.stdout.on('data', (chunk) => {
         if (responseClosed) return;
         buf += chunk.toString();
@@ -230,49 +344,14 @@ const server = createServer(async (req, res) => {
         buf = lines.pop();
         for (const line of lines) {
           if (responseClosed) break;
-          if (!line.trim()) continue;
-          let ev;
-          try { ev = JSON.parse(line); } catch { continue; }
-
-          const se = ev.type === 'stream_event' ? (ev.event || {}) : ev;
-          if (se.type === 'content_block_start') {
-            const cb = se.content_block || {};
-            inThinking = cb.type === 'thinking';
-            if (inThinking) {
-              sse({ id: chatId, object: 'chat.completion.chunk', choices: [{ index: 0, delta: sentRole ? { content: '[THINKING]' } : { role: 'assistant', content: '[THINKING]' }, finish_reason: null }] });
-              sentRole = true;
-            } else if (!sentRole) {
-              sse({ id: chatId, object: 'chat.completion.chunk', choices: [{ index: 0, delta: { role: 'assistant', content: '' }, finish_reason: null }] });
-              sentRole = true;
-            }
-          } else if (se.type === 'content_block_delta') {
-            const d = se.delta || {};
-            if (d.thinking) {
-              sse({ id: chatId, object: 'chat.completion.chunk', choices: [{ index: 0, delta: { content: d.thinking }, finish_reason: null }] });
-            }
-            if (d.text) {
-              sse({ id: chatId, object: 'chat.completion.chunk', choices: [{ index: 0, delta: { content: d.text }, finish_reason: null }] });
-              sentResponseText = true;
-            }
-          } else if (se.type === 'content_block_stop') {
-            if (inThinking) {
-              sse({ id: chatId, object: 'chat.completion.chunk', choices: [{ index: 0, delta: { content: '[/THINKING]' }, finish_reason: null }] });
-              inThinking = false;
-            }
-          } else if (ev.type === 'result') {
-            rememberClaudeSession(conversationKey, ev, system, model);
-            if (ev.result && !sentResponseText) {
-              sse({ id: chatId, object: 'chat.completion.chunk', choices: [{ index: 0, delta: sentRole ? { content: ev.result } : { role: 'assistant', content: ev.result }, finish_reason: null }] });
-              sentRole = true;
-            }
-            sse({ id: chatId, object: 'chat.completion.chunk', choices: [{ index: 0, delta: {}, finish_reason: 'stop' }], usage: { prompt_tokens: ev.usage?.input_tokens || 0, completion_tokens: ev.usage?.output_tokens || 0 } });
-            res.write('data: [DONE]\n\n');
-            finishStream();
-          }
+          processLine(line);
         }
       });
       child.stderr.on('data', () => {}); // handled in spawnClaude
-      child.on('close', finishStream);
+      child.on('close', () => {
+        if (buf.trim()) processLine(buf);
+        finishStream();
+      });
       child.on('error', finishStream);
       res.on('close', () => { if (!responseClosed) abortStream(); });
 
@@ -283,7 +362,7 @@ const server = createServer(async (req, res) => {
         try {
           const evts = output.split('\n').map(l => { try { return JSON.parse(l); } catch { return null; } }).filter(Boolean);
           const result = evts.find(e => e.type === 'result');
-          rememberClaudeSession(conversationKey, result, system, model);
+          rememberClaudeSession(conversationKey, result, stableSystemPrompt, model);
           res.writeHead(200, { ...CORS, 'Content-Type': 'application/json' });
           res.end(JSON.stringify({
             id: chatId, object: 'chat.completion',
@@ -304,6 +383,7 @@ const server = createServer(async (req, res) => {
     if (!checkAuth(req, CORS, res)) return;
     const body = JSON.parse(await readBody(req));
     const sysText = body.system ? (typeof body.system === 'string' ? body.system : body.system.map(b => b.text || '').join('\n')) : '';
+    const { stableSystemPrompt, dynamicContext } = splitSystemPrompt(sysText);
     let prompt = '';
     for (const msg of body.messages || []) {
       const text = typeof msg.content === 'string' ? msg.content
@@ -316,9 +396,9 @@ const server = createServer(async (req, res) => {
     const conversationKey = getConversationKey(body, req);
     const resetSession = body.metadata?.reset_claude_session === true || req.headers['x-claude-reset-session'] === '1';
     const turn = prepareClaudeTurn({
-      systemPrompt: sysText,
-      fullPrompt: prompt,
-      latestPrompt: getLatestUserPrompt(body.messages),
+      systemPrompt: stableSystemPrompt,
+      fullPrompt: attachDynamicContext(dynamicContext, prompt),
+      latestPrompt: attachDynamicContext(dynamicContext, getLatestUserPrompt(body.messages)),
       model,
       conversationKey,
       resetSession,
@@ -342,6 +422,38 @@ const server = createServer(async (req, res) => {
         try { child.kill(); } catch {}
       }
       res.write(`event: message_start\ndata: ${JSON.stringify({type:"message_start",message:{id:msgId,type:"message",role:"assistant",content:[],model:model||"claude-sonnet-4-6",stop_reason:null,usage:{input_tokens:0,output_tokens:0}}})}\n\n`);
+
+      function processAnthropicLine(line) {
+        if (responseClosed) return;
+        if (!line.trim()) return;
+        try {
+          const ev = JSON.parse(line);
+          const se = ev.type === 'stream_event' ? (ev.event || {}) : ev;
+          if (se.type === 'content_block_start') {
+            const cb = se.content_block || {};
+            res.write(`event: content_block_start\ndata: ${JSON.stringify({type:"content_block_start",index:blockIdx,content_block:{type:cb.type,text:cb.type==='text'?'':undefined,thinking:cb.type==='thinking'?'':undefined}})}\n\n`);
+          } else if (se.type === 'content_block_delta') {
+            const d = se.delta || {};
+            if (d.text) sentTextDelta = true;
+            res.write(`event: content_block_delta\ndata: ${JSON.stringify({type:"content_block_delta",index:blockIdx,delta:d})}\n\n`);
+          } else if (se.type === 'content_block_stop') {
+            res.write(`event: content_block_stop\ndata: ${JSON.stringify({type:"content_block_stop",index:blockIdx})}\n\n`);
+            blockIdx++;
+          } else if (ev.type === 'result') {
+            rememberClaudeSession(conversationKey, ev, stableSystemPrompt, model);
+            if (ev.result && !sentTextDelta) {
+              res.write(`event: content_block_start\ndata: ${JSON.stringify({type:"content_block_start",index:blockIdx,content_block:{type:"text",text:""}})}\n\n`);
+              res.write(`event: content_block_delta\ndata: ${JSON.stringify({type:"content_block_delta",index:blockIdx,delta:{type:"text_delta",text:ev.result}})}\n\n`);
+              res.write(`event: content_block_stop\ndata: ${JSON.stringify({type:"content_block_stop",index:blockIdx})}\n\n`);
+              blockIdx++;
+            }
+            res.write(`event: message_delta\ndata: ${JSON.stringify({type:"message_delta",delta:{stop_reason:ev.stop_reason||"end_turn"},usage:{output_tokens:ev.usage?.output_tokens||0}})}\n\n`);
+            res.write(`event: message_stop\ndata: ${JSON.stringify({type:"message_stop"})}\n\n`);
+            finishStream();
+          }
+        } catch {}
+      }
+
       child.stdout.on('data', (chunk) => {
         if (responseClosed) return;
         buf += chunk.toString();
@@ -349,37 +461,14 @@ const server = createServer(async (req, res) => {
         buf = lines.pop();
         for (const line of lines) {
           if (responseClosed) break;
-          if (!line.trim()) continue;
-          try {
-            const ev = JSON.parse(line);
-            const se = ev.type === 'stream_event' ? (ev.event || {}) : ev;
-            if (se.type === 'content_block_start') {
-              const cb = se.content_block || {};
-              res.write(`event: content_block_start\ndata: ${JSON.stringify({type:"content_block_start",index:blockIdx,content_block:{type:cb.type,text:cb.type==='text'?'':undefined,thinking:cb.type==='thinking'?'':undefined}})}\n\n`);
-            } else if (se.type === 'content_block_delta') {
-              const d = se.delta || {};
-              if (d.text) sentTextDelta = true;
-              res.write(`event: content_block_delta\ndata: ${JSON.stringify({type:"content_block_delta",index:blockIdx,delta:d})}\n\n`);
-            } else if (se.type === 'content_block_stop') {
-              res.write(`event: content_block_stop\ndata: ${JSON.stringify({type:"content_block_stop",index:blockIdx})}\n\n`);
-              blockIdx++;
-            } else if (ev.type === 'result') {
-              rememberClaudeSession(conversationKey, ev, sysText, model);
-              if (ev.result && !sentTextDelta) {
-                res.write(`event: content_block_start\ndata: ${JSON.stringify({type:"content_block_start",index:blockIdx,content_block:{type:"text",text:""}})}\n\n`);
-                res.write(`event: content_block_delta\ndata: ${JSON.stringify({type:"content_block_delta",index:blockIdx,delta:{type:"text_delta",text:ev.result}})}\n\n`);
-                res.write(`event: content_block_stop\ndata: ${JSON.stringify({type:"content_block_stop",index:blockIdx})}\n\n`);
-                blockIdx++;
-              }
-              res.write(`event: message_delta\ndata: ${JSON.stringify({type:"message_delta",delta:{stop_reason:ev.stop_reason||"end_turn"},usage:{output_tokens:ev.usage?.output_tokens||0}})}\n\n`);
-              res.write(`event: message_stop\ndata: ${JSON.stringify({type:"message_stop"})}\n\n`);
-              finishStream();
-            }
-          } catch {}
+          processAnthropicLine(line);
         }
       });
       child.stderr.on('data', () => {}); // handled in spawnClaude
-      child.on('close', finishStream);
+      child.on('close', () => {
+        if (buf.trim()) processAnthropicLine(buf);
+        finishStream();
+      });
       child.on('error', finishStream);
       res.on('close', () => { if (!responseClosed) abortStream(); });
     } else {
@@ -388,7 +477,7 @@ const server = createServer(async (req, res) => {
       child.on('close', () => {
         try {
           const result = output.split('\n').map(l => { try { return JSON.parse(l); } catch { return null; } }).filter(Boolean).find(e => e.type === 'result');
-          rememberClaudeSession(conversationKey, result, sysText, model);
+          rememberClaudeSession(conversationKey, result, stableSystemPrompt, model);
           res.writeHead(200, { ...CORS, 'Content-Type': 'application/json' });
           res.end(JSON.stringify({
             id: `msg_proxy_${Date.now()}`, type: 'message', role: 'assistant',
@@ -406,13 +495,32 @@ const server = createServer(async (req, res) => {
   }
 
   if (req.url === '/health') {
+    const sessions = Object.entries(sessionStore).map(([k, v]) => ({
+      key: k,
+      sessionId: v.sessionId?.slice(0, 12) + '...',
+      model: v.model,
+      systemHash: v.systemHash?.slice(0, 8) + '...',
+      updatedAt: v.updatedAt,
+    }));
     res.writeHead(200, { 'Content-Type': 'application/json' });
     res.end(JSON.stringify({
       status: 'ok',
       service: 'claude-proxy',
       resume_sessions: RESUME_SESSIONS,
       stored_sessions: Object.keys(sessionStore).length,
+      sessions,
     }));
+    return;
+  }
+
+  if (req.url === '/clear-sessions' && req.method === 'POST') {
+    if (!checkAuth(req, CORS, res)) return;
+    const count = Object.keys(sessionStore).length;
+    for (const k of Object.keys(sessionStore)) delete sessionStore[k];
+    saveSessionStore();
+    console.log(`[proxy] cleared all ${count} sessions`);
+    res.writeHead(200, { ...CORS, 'Content-Type': 'application/json' });
+    res.end(JSON.stringify({ cleared: count }));
     return;
   }
 
