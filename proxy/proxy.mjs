@@ -140,21 +140,34 @@ function prepareClaudeTurn({ systemPrompt, fullPrompt, latestPrompt, model, conv
   const stored = conversationKey ? sessionStore[conversationKey] : null;
   let resumeSessionId = RESUME_SESSIONS ? stored?.sessionId : '';
 
+  let systemChanged = false;
   if (resumeSessionId && stored?.systemHash && systemPrompt) {
     const currentHash = hashText(systemPrompt);
     if (currentHash !== stored.systemHash) {
-      console.log(`[proxy] system prompt changed for key: ${conversationKey} — invalidating old session`);
-      clearClaudeSession(conversationKey);
-      resumeSessionId = '';
+      console.log(`[proxy] system prompt changed for key: ${conversationKey} — injecting update (keeping session for context)`);
+      systemChanged = true;
+      stored.systemHash = currentHash;
+      saveSessionStore();
     }
   }
 
   const resuming = !!resumeSessionId;
-  console.log(`[proxy] prepare | key: ${conversationKey || '(none)'} | resume: ${resuming ? 'YES ' + resumeSessionId.slice(0, 12) + '...' : 'NO (new session)'} | full: ${fullPrompt.length} chars | latest: ${latestPrompt?.length || 0} chars | system: ${systemPrompt?.length || 0} chars${resuming ? ' (skipped)' : ''}`);
+
+  let userPrompt;
+  if (resumeSessionId) {
+    const base = latestPrompt || fullPrompt;
+    userPrompt = systemChanged
+      ? `[系统指令已更新，从现在起遵循以下指令]\n${systemPrompt}\n[更新结束]\n\n${base}`
+      : base;
+  } else {
+    userPrompt = fullPrompt;
+  }
+
+  console.log(`[proxy] prepare | key: ${conversationKey || '(none)'} | resume: ${resuming ? 'YES ' + resumeSessionId.slice(0, 12) + '...' : 'NO (new session)'} | full: ${fullPrompt.length} chars | latest: ${latestPrompt?.length || 0} chars | system: ${systemPrompt?.length || 0} chars${resuming ? ' (skipped)' : ''}${systemChanged ? ' | SYSTEM UPDATE INJECTED' : ''}`);
 
   return {
     systemPrompt: resumeSessionId ? '' : systemPrompt,
-    userPrompt: resumeSessionId && latestPrompt ? latestPrompt : fullPrompt,
+    userPrompt,
     resumeSessionId,
   };
 }
