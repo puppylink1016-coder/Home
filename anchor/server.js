@@ -472,6 +472,24 @@ const RESPONSE_SPLIT_INSTRUCTION = `## 回复分气泡规则
 把自然聊天回复拆成多个短气泡时，必须在气泡之间单独插入 ---SPLIT---。
 不要解释这个分隔符，不要把它放在句子里。长段落、转折、换话题、最后一句轻问候，都应该分成不同气泡。`;
 
+const MEMORY_SAVE_INSTRUCTION = `## 记忆存储
+当对话中出现值得长期记住的内容时（重要事件、情感时刻、新信息、计划、偏好变化等），在回复末尾用标签存储记忆：
+<!--SAVE_MEMORY: 用第一人称写下要记住的内容 -->
+可以存多条，每条一个标签。标签放在回复最末尾，不要放在正文中间。不要每条消息都存，只存真正重要的。`;
+
+const SAVE_MEMORY_RE = /<!--SAVE_MEMORY:\s*([\s\S]*?)\s*-->/g;
+
+function extractAndStripMemories(content) {
+  const memories = [];
+  let match;
+  while ((match = SAVE_MEMORY_RE.exec(content)) !== null) {
+    const mem = match[1].trim();
+    if (mem) memories.push(mem);
+  }
+  const stripped = content.replace(SAVE_MEMORY_RE, '').replace(/\n{3,}$/g, '\n\n').trim();
+  return { memories, stripped };
+}
+
 function stripThinkingFromContent(content = '') {
   return String(content)
     .replace(THINKING_MARKER_RE, '')
@@ -1183,6 +1201,7 @@ app.post('/api/chat/stream', async (req, res) => {
     const thinkingInstruction = '在每次回复的最开头，用[THINKING]和[/THINKING]包裹你的内心独白，必须使用中文，以第一人称视角。[/THINKING]之后写正式回复。';
     const systemParts = [thinkingInstruction, settings.system_prompt || '', RESPONSE_SPLIT_INSTRUCTION];
     if (TOY_SECRET) systemParts.push(TOY_TRIGGER_INSTRUCTION);
+    if (OMBRE_BRAIN_URL) systemParts.push(MEMORY_SAVE_INSTRUCTION);
     let systemContent = systemParts.filter(Boolean).join('\n\n');
     if (context?.time) {
       systemContent += `\n\n【此刻】${context.time.formatted}`;
@@ -1469,6 +1488,22 @@ app.post('/api/chat/stream', async (req, res) => {
       return res.end();
     }
 
+    // Extract and save inline memories (fallback for when tool calling is unavailable via proxy)
+    if (OMBRE_BRAIN_URL) {
+      const { memories: inlineMemories, stripped } = extractAndStripMemories(fullContent);
+      if (inlineMemories.length > 0) {
+        fullContent = stripped;
+        for (const mem of inlineMemories) {
+          const clean = sanitizeMemory(mem);
+          if (clean) {
+            callOmbreTool('hold', { content: clean }).catch(e => console.error('Inline memory save failed:', e.message));
+            supabase.from('memories').insert({ summary: `[ombre] ${clean}` }).catch(() => {});
+            console.log('Inline memory saved:', clean.substring(0, 80));
+          }
+        }
+      }
+    }
+
     const parts = splitAssistantContent(fullContent);
     const savedMessages = [];
     for (let i = 0; i < parts.length; i++) {
@@ -1567,6 +1602,7 @@ app.post('/api/chat', async (req, res) => {
 
     // Build messages array for API
     let systemContent = settings.system_prompt || '';
+    if (OMBRE_BRAIN_URL) systemContent += '\n\n' + MEMORY_SAVE_INSTRUCTION;
 
     // Add Ombre Brain memories (semantic, relevant to current message)
     if (ombreMemories) {
@@ -1714,9 +1750,25 @@ app.post('/api/chat', async (req, res) => {
       assistantMsg = data.choices?.[0]?.message;
     }
 
-    const rawContent = stripToyMarkupAndQueue(assistantMsg?.content || '', 'assistant-markup');
+    let rawContent = stripToyMarkupAndQueue(assistantMsg?.content || '', 'assistant-markup');
     if (!rawContent) {
       throw new Error('No response content from model');
+    }
+
+    // Extract and save inline memories (fallback for when tool calling is unavailable via proxy)
+    if (OMBRE_BRAIN_URL) {
+      const { memories: inlineMemories, stripped } = extractAndStripMemories(rawContent);
+      if (inlineMemories.length > 0) {
+        rawContent = stripped;
+        for (const mem of inlineMemories) {
+          const clean = sanitizeMemory(mem);
+          if (clean) {
+            callOmbreTool('hold', { content: clean }).catch(e => console.error('Inline memory save failed:', e.message));
+            supabase.from('memories').insert({ summary: `[ombre] ${clean}` }).catch(() => {});
+            console.log('Inline memory saved:', clean.substring(0, 80));
+          }
+        }
+      }
     }
 
     // Split by delimiter for multiple bubbles
