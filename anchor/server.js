@@ -128,6 +128,7 @@ const LLM_API_KEY = process.env.LLM_API_KEY || process.env.OPENROUTER_API_KEY ||
 const AUX_LLM_BASE_URL = process.env.AUX_LLM_BASE_URL || 'https://openrouter.ai/api/v1/chat/completions';
 const AUX_LLM_API_KEY = process.env.AUX_LLM_API_KEY || process.env.OPENROUTER_API_KEY || '';
 const AUX_MURMUR_MODEL = process.env.AUX_MURMUR_MODEL || 'deepseek/deepseek-chat';
+const AUX_COMPRESS_MODEL = process.env.AUX_COMPRESS_MODEL || 'deepseek/deepseek-chat';
 
 const VAPID_PUBLIC_KEY = process.env.VAPID_PUBLIC_KEY || '';
 const VAPID_PRIVATE_KEY = process.env.VAPID_PRIVATE_KEY || '';
@@ -138,6 +139,14 @@ if (pushConfigured) {
   webpush.setVapidDetails(VAPID_SUBJECT, VAPID_PUBLIC_KEY, VAPID_PRIVATE_KEY);
 }
 
+function describeEndpoint(url = '') {
+  try {
+    const parsed = new URL(url);
+    return parsed.origin + parsed.pathname;
+  } catch {
+    return url || '(unset)';
+  }
+}
 
 // --- Memory Sanitization ---
 const MEMORY_MAX_LENGTH = 800;
@@ -716,7 +725,7 @@ async function checkMurmurEligibility(force = false) {
     .select('id, created_at, source')
     .gte('created_at', start.toISOString())
     .lt('created_at', end.toISOString())
-    .neq('source', 'manual')
+    .not('source', 'like', 'manual%')
     .order('created_at', { ascending: false });
   if (todayErr) throw todayErr;
 
@@ -849,6 +858,7 @@ ${context.ombreDream || '无'}
 
 只输出 JSON：{"action":"send|skip","thinking":"...","content":"...","reason":"..."}`;
 
+  console.log(`[murmur] fetching AUX LLM: ${describeEndpoint(AUX_LLM_BASE_URL)} | model: ${model}`);
   const response = await fetch(AUX_LLM_BASE_URL, {
     method: 'POST',
     headers: {
@@ -1272,6 +1282,7 @@ app.post('/api/chat/stream', async (req, res) => {
         max_tokens: settings.max_tokens,
         stream: true,
         user: String(sessionId),
+        metadata: { sessionId: String(sessionId) },
       };
 
       if (tools.length > 0) requestBody.tools = tools;
@@ -1282,6 +1293,7 @@ app.post('/api/chat/stream', async (req, res) => {
         headers: {
           'Authorization': `Bearer ${LLM_API_KEY}`,
           'Content-Type': 'application/json',
+          'x-claude-session-key': String(sessionId),
         },
         body: JSON.stringify(requestBody),
       });
@@ -1681,7 +1693,8 @@ app.post('/api/chat', async (req, res) => {
       messages: apiMessages,
       temperature: settings.temperature,
       max_tokens: settings.max_tokens,
-      user: String(sessionId)
+      user: String(sessionId),
+      metadata: { sessionId: String(sessionId) }
     };
     if (tools.length > 0) {
       requestBody.tools = tools;
@@ -1691,7 +1704,8 @@ app.post('/api/chat', async (req, res) => {
       method: 'POST',
       headers: {
         'Authorization': `Bearer ${LLM_API_KEY}`,
-        'Content-Type': 'application/json'
+        'Content-Type': 'application/json',
+        'x-claude-session-key': String(sessionId)
       },
       body: JSON.stringify(requestBody)
     });
@@ -1745,7 +1759,8 @@ app.post('/api/chat', async (req, res) => {
         method: 'POST',
         headers: {
           'Authorization': `Bearer ${LLM_API_KEY}`,
-          'Content-Type': 'application/json'
+          'Content-Type': 'application/json',
+          'x-claude-session-key': String(sessionId)
         },
         body: JSON.stringify(requestBody)
       });
@@ -1837,6 +1852,7 @@ async function compress(sessionId, settings) {
     .map(m => `${m.role}: ${m.content}`)
     .join('\n');
 
+  console.log(`[compress] fetching AUX LLM: ${describeEndpoint(AUX_LLM_BASE_URL)} | model: ${AUX_COMPRESS_MODEL}`);
   const response = await fetch(AUX_LLM_BASE_URL, {
     method: 'POST',
     headers: {
@@ -1844,7 +1860,7 @@ async function compress(sessionId, settings) {
       'Content-Type': 'application/json'
     },
     body: JSON.stringify({
-      model: 'deepseek/deepseek-chat',
+      model: AUX_COMPRESS_MODEL,
       messages: [
         {
           role: 'system',
@@ -1923,6 +1939,7 @@ app.post('/api/compress', async (req, res) => {
       .map(m => `${m.role}: ${m.content}`)
       .join('\n');
 
+    console.log(`[compress:manual] fetching AUX LLM: ${describeEndpoint(AUX_LLM_BASE_URL)} | model: ${AUX_COMPRESS_MODEL}`);
     const response = await fetch(AUX_LLM_BASE_URL, {
       method: 'POST',
       headers: {
@@ -1930,7 +1947,7 @@ app.post('/api/compress', async (req, res) => {
         'Content-Type': 'application/json'
       },
       body: JSON.stringify({
-        model: 'deepseek/deepseek-chat',
+        model: AUX_COMPRESS_MODEL,
         messages: [
           {
             role: 'system',

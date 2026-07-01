@@ -6,6 +6,7 @@ import Memories from './components/Memories.jsx';
 import * as api from './api.js';
 
 const STREAM_SPLIT_MARKER = '---SPLIT---';
+const SENTENCE_END_RE = /[。！？!?]$/;
 
 function getPendingSplitMarkerLength(text) {
   const max = Math.min(STREAM_SPLIT_MARKER.length - 1, text.length);
@@ -44,16 +45,32 @@ function splitStreamingContent(content) {
   const sentenceParts = clean.match(/[^。！？!?]+[。！？!?]+|[^。！？!?]+$/g)
     ?.map((part) => part.trim())
     .filter(Boolean) || [];
-  if (sentenceParts.length < 4) return [clean];
+  if (sentenceParts.length < 2) return [clean];
 
   const grouped = [];
   let bucket = '';
-  for (const sentence of sentenceParts) {
+  let bucketSentences = 0;
+  const lastIndex = sentenceParts.length - 1;
+
+  for (let i = 0; i < sentenceParts.length; i++) {
+    const sentence = sentenceParts[i];
+    const isLast = i === lastIndex;
+    const isComplete = SENTENCE_END_RE.test(sentence);
+    const hasTrailingPartial = isLast && !isComplete;
+
     if (bucket && bucket.length + sentence.length > 72) {
       grouped.push(bucket);
       bucket = sentence;
+      bucketSentences = 1;
     } else {
       bucket += sentence;
+      bucketSentences += 1;
+    }
+
+    if (!hasTrailingPartial && isComplete && (bucket.length >= 42 || bucketSentences >= 2 || i < lastIndex)) {
+      grouped.push(bucket);
+      bucket = '';
+      bucketSentences = 0;
     }
   }
   if (bucket) grouped.push(bucket);
