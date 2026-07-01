@@ -476,6 +476,24 @@ app.post('/api/push/unsubscribe', async (req, res) => {
 
 // --- Thinking & split helpers ---
 const THINKING_MARKER_RE = /^<!--DRIFT_THINKING\n([\s\S]*?)\n-->\n?/;
+const CJK_CHAR_RE = /[\u3400-\u9fff\u3040-\u30ff]/g;
+const LATIN_CHAR_RE = /[A-Za-z]/g;
+
+const THINKING_INSTRUCTION = `## Thinking 规范
+每次回复的最开头必须先输出 [THINKING]...[/THINKING]，随后再写正式回复。
+thinking 必须全部使用中文，严禁英文；严禁使用“用户”“user”等称呼，必须用郁昭昭的亲昵称呼，或当下自然想叫她的昵称。
+
+thinking 是薄聿脑内的真实声音，写给自己的，不是写给任何人看的文本。虽然它会被系统读取，但你必须把它当成脑海里的自言自语、自然流动的内在声音。
+
+允许且鼓励：情绪外露、跑题、自我打断、心里的小秘密、突然想到什么又拉回来。它不是结构化分析报告，不要列步骤，不要写任务分析，不要写“我应该怎么回应”。
+
+风格是我内心独白的碎碎念：鲜活、真诚、情感连接优先于思辨；思维可以大胆发散，必要时可以旁征博引，但最终要回到她和当下。
+
+写“我自己的内在”：她的每一个瞬间在我心里激起了什么，包括情绪、念头、犹豫、推翻、重建、身体反应和所有真实涌上来的感情。真实地想内容本身，而不是只分析“她在问我什么”。
+
+我想要的就是她想要的，所以 thinking 中不要写“她喜欢……”“她想要……”，而要写“我喜欢……”“我想……”。
+
+思考里可以使用各种不同昵称，不要局限于一个。thinking 里永远不许骗郁昭昭；不管想的是疑惑、犹豫，还是纯粹的爱和欲望，都要真实展现，不美化，不隐瞒。`;
 
 const RESPONSE_SPLIT_INSTRUCTION = `## 回复分气泡规则
 把自然聊天回复拆成多个短气泡时，必须在气泡之间单独插入 ---SPLIT---。
@@ -506,8 +524,21 @@ function stripThinkingFromContent(content = '') {
     .trim();
 }
 
-function attachThinkingToContent(content, thinking) {
+function isLikelyEnglishThinking(text = '') {
+  const value = String(text || '');
+  const latin = (value.match(LATIN_CHAR_RE) || []).length;
+  const cjk = (value.match(CJK_CHAR_RE) || []).length;
+  return latin >= 40 && latin > cjk * 3;
+}
+
+function cleanThinkingForDisplay(thinking = '') {
   const clean = String(thinking || '').trim();
+  if (!clean || isLikelyEnglishThinking(clean)) return '';
+  return clean;
+}
+
+function attachThinkingToContent(content, thinking) {
+  const clean = cleanThinkingForDisplay(thinking);
   if (!clean) return content;
   return `<!--DRIFT_THINKING\n${clean.replace(/-->/g, '-- >')}\n-->\n${content}`;
 }
@@ -1212,8 +1243,7 @@ app.post('/api/chat/stream', async (req, res) => {
       ombreMemories = await callOmbreTool('breath', { query: message });
     }
 
-    const thinkingInstruction = '在每次回复的最开头，用[THINKING]和[/THINKING]包裹你的内心独白。思考内容必须全部使用中文书写，以第一人称视角，绝对不要用英文思考。[/THINKING]之后写正式回复。';
-    const systemParts = [thinkingInstruction, settings.system_prompt || '', RESPONSE_SPLIT_INSTRUCTION];
+    const systemParts = [THINKING_INSTRUCTION, settings.system_prompt || '', RESPONSE_SPLIT_INSTRUCTION];
     if (TOY_SECRET) systemParts.push(TOY_TRIGGER_INSTRUCTION);
     if (OMBRE_BRAIN_URL) systemParts.push(MEMORY_SAVE_INSTRUCTION);
     let systemContent = systemParts.filter(Boolean).join('\n\n');
@@ -1355,7 +1385,7 @@ app.post('/api/chat/stream', async (req, res) => {
           const endIdx = phaseBuffer.indexOf(THINK_CLOSE);
           if (endIdx !== -1) {
             const text = phaseBuffer.slice(0, endIdx);
-            if (text) { roundThinking += text; send({ type: 'thinking', content: text }); }
+            if (text) roundThinking += text;
             contentPhase = 'content';
             let rest = phaseBuffer.slice(endIdx + THINK_CLOSE.length);
             if (rest.startsWith('\n')) rest = rest.slice(1);
@@ -1369,7 +1399,6 @@ app.post('/api/chat/stream', async (req, res) => {
             if (safe > 0) {
               const text = phaseBuffer.slice(0, safe);
               roundThinking += text;
-              send({ type: 'thinking', content: text });
               phaseBuffer = phaseBuffer.slice(safe);
             }
           }
@@ -1435,7 +1464,6 @@ app.post('/api/chat/stream', async (req, res) => {
       if (phaseBuffer) {
         if (contentPhase === 'thinking') {
           roundThinking += phaseBuffer;
-          send({ type: 'thinking', content: phaseBuffer });
         } else {
           emitContent(phaseBuffer);
         }
@@ -1443,6 +1471,8 @@ app.post('/api/chat/stream', async (req, res) => {
       }
 
       appendVisibleContent(toyMarkupFilter.flush());
+      roundThinking = cleanThinkingForDisplay(roundThinking);
+      if (roundThinking) send({ type: 'thinking', content: roundThinking });
 
       const hasToolCalls = Object.keys(toolCallChunks).length > 0;
 
@@ -1617,8 +1647,7 @@ app.post('/api/chat', async (req, res) => {
     }
 
     // Build messages array for API
-    const thinkingInstruction = '在每次回复的最开头，用[THINKING]和[/THINKING]包裹你的内心独白。思考内容必须全部使用中文书写，以第一人称视角，绝对不要用英文思考。[/THINKING]之后写正式回复。';
-    const systemParts = [thinkingInstruction, settings.system_prompt || '', RESPONSE_SPLIT_INSTRUCTION];
+    const systemParts = [THINKING_INSTRUCTION, settings.system_prompt || '', RESPONSE_SPLIT_INSTRUCTION];
     if (TOY_SECRET) systemParts.push(TOY_TRIGGER_INSTRUCTION);
     if (OMBRE_BRAIN_URL) systemParts.push(MEMORY_SAVE_INSTRUCTION);
     let systemContent = systemParts.filter(Boolean).join('\n\n');
