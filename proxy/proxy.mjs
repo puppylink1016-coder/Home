@@ -10,6 +10,9 @@ const AUTH_TOKEN = process.env.PROXY_AUTH_TOKEN || '';
 const CLAUDE_CWD = process.env.CLAUDE_CWD || './';
 const RESUME_SESSIONS = process.env.CLAUDE_RESUME_SESSIONS !== '0';
 const EXPOSE_NATIVE_THINKING = process.env.CLAUDE_EXPOSE_NATIVE_THINKING === '1';
+const CLAUDE_CHILD_ANTHROPIC_BASE_URL = process.env.CLAUDE_CHILD_ANTHROPIC_BASE_URL || '';
+const CLAUDE_CHILD_DISABLE_ADAPTIVE_THINKING = process.env.CLAUDE_CHILD_DISABLE_ADAPTIVE_THINKING || '';
+const CLAUDE_CACHE_FIX_EXPECTED = process.env.CLAUDE_CACHE_FIX_EXPECTED === '1';
 const SESSION_STORE_PATH = resolve(
   process.env.CLAUDE_SESSION_STORE || './.claude-proxy-sessions.json'
 );
@@ -27,6 +30,52 @@ const DYNAMIC_SECTION_MARKERS = [
   { marker: RELEVANT_MEMORY_MARKER, sticky: false },
   { marker: LONG_TERM_MEMORY_MARKER, sticky: true },
 ];
+
+function describeBaseUrl(raw = '') {
+  if (!raw) return '';
+  try {
+    const u = new URL(raw);
+    return `${u.protocol}//${u.hostname}${u.port ? ':' + u.port : ''}`;
+  } catch {
+    return '(set)';
+  }
+}
+
+function isLikelyCacheFixBase(raw = '') {
+  if (!raw) return false;
+  try {
+    const u = new URL(raw);
+    const port = u.port || (u.protocol === 'https:' ? '443' : '80');
+    return ['127.0.0.1', 'localhost', '::1', '[::1]'].includes(u.hostname) && port === '9801';
+  } catch {
+    return false;
+  }
+}
+
+function buildClaudeEnv() {
+  const env = { ...process.env };
+  if (CLAUDE_CHILD_ANTHROPIC_BASE_URL) {
+    env.ANTHROPIC_BASE_URL = CLAUDE_CHILD_ANTHROPIC_BASE_URL;
+  }
+  if (CLAUDE_CHILD_DISABLE_ADAPTIVE_THINKING) {
+    env.CLAUDE_CODE_DISABLE_ADAPTIVE_THINKING = CLAUDE_CHILD_DISABLE_ADAPTIVE_THINKING;
+  }
+  return env;
+}
+
+function getClaudeChildConfig(env = buildClaudeEnv()) {
+  const baseUrl = env.ANTHROPIC_BASE_URL || '';
+  const usesCacheFixProxy = isLikelyCacheFixBase(baseUrl);
+  return {
+    anthropic_base_url: describeBaseUrl(baseUrl),
+    uses_cache_fix_proxy: usesCacheFixProxy,
+    cache_fix_expected: CLAUDE_CACHE_FIX_EXPECTED,
+    cache_fix_status: CLAUDE_CACHE_FIX_EXPECTED
+      ? (usesCacheFixProxy ? 'configured' : 'expected_missing')
+      : (usesCacheFixProxy ? 'configured' : 'not_configured'),
+    adaptive_thinking_disabled: env.CLAUDE_CODE_DISABLE_ADAPTIVE_THINKING === '1',
+  };
+}
 
 function readBody(req) {
   return new Promise((res, rej) => {
@@ -273,8 +322,13 @@ function spawnClaude(systemPrompt, userPrompt, model, resumeSessionId = '') {
   if (resumeSessionId) args.push('--resume', resumeSessionId);
   else if (systemPrompt) args.push('--system-prompt', systemPrompt);
   if (m && m !== 'claude-sonnet-4-6') args.push('--model', m);
-  console.log(`[proxy] spawn claude | model: ${m || '(default)'} | prompt: ${userPrompt.length} chars | system: ${systemPrompt?.length || 0} chars | resume: ${resumeSessionId ? 'yes' : 'no'}`);
-  const child = spawn('claude', args, { stdio: ['pipe', 'pipe', 'pipe'], cwd: CLAUDE_CWD });
+  const childEnv = buildClaudeEnv();
+  const childConfig = getClaudeChildConfig(childEnv);
+  if (childConfig.cache_fix_status === 'expected_missing') {
+    console.warn('[proxy] cache-fix expected but claude child is not pointed at http://127.0.0.1:9801');
+  }
+  console.log(`[proxy] spawn claude | model: ${m || '(default)'} | prompt: ${userPrompt.length} chars | system: ${systemPrompt?.length || 0} chars | resume: ${resumeSessionId ? 'yes' : 'no'} | anthropic_base: ${childConfig.anthropic_base_url || '(default)'} | cache_fix: ${childConfig.cache_fix_status} | adaptive_thinking: ${childConfig.adaptive_thinking_disabled ? 'disabled' : 'default'}`);
+  const child = spawn('claude', args, { stdio: ['pipe', 'pipe', 'pipe'], cwd: CLAUDE_CWD, env: childEnv });
   child.stdin.write(userPrompt);
   child.stdin.end();
   child.stderr.on('data', d => console.error(`[claude stderr] ${d.toString().trim()}`));
@@ -576,6 +630,7 @@ const server = createServer(async (req, res) => {
       status: 'ok',
       service: 'claude-proxy',
       resume_sessions: RESUME_SESSIONS,
+      claude_child: getClaudeChildConfig(),
       stored_sessions: Object.keys(sessionStore).length,
       sessions,
     }));
@@ -601,4 +656,6 @@ server.listen(PORT, '0.0.0.0', () => {
   console.log(`  /v1/messages          (Anthropic)`);
   console.log(`  /v1/chat/completions  (OpenAI)`);
   console.log(`cwd: ${CLAUDE_CWD} | auth: ${AUTH_TOKEN ? 'enabled' : 'disabled'}`);
+  const childConfig = getClaudeChildConfig();
+  console.log(`claude child: anthropic_base=${childConfig.anthropic_base_url || '(default)'} | cache_fix=${childConfig.cache_fix_status} | adaptive_thinking=${childConfig.adaptive_thinking_disabled ? 'disabled' : 'default'}`);
 });
