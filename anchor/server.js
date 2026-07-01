@@ -528,7 +528,11 @@ function isLikelyEnglishThinking(text = '') {
   const value = String(text || '');
   const latin = (value.match(LATIN_CHAR_RE) || []).length;
   const cjk = (value.match(CJK_CHAR_RE) || []).length;
-  return latin >= 40 && latin > cjk * 3;
+  return (latin >= 12 && cjk === 0) || (latin >= 40 && latin > cjk * 3);
+}
+
+function hasCjkText(text = '') {
+  return (String(text || '').match(CJK_CHAR_RE) || []).length > 0;
 }
 
 function cleanThinkingForDisplay(thinking = '') {
@@ -1341,6 +1345,9 @@ app.post('/api/chat/stream', async (req, res) => {
       let buffer = '';
       let roundContent = '';
       let roundThinking = '';
+      let pendingThinking = '';
+      let thinkingAllowed = false;
+      let thinkingSuppressed = false;
       const toolCallChunks = {};
       const toyMarkupFilter = createToyMarkupFilter('assistant-markup');
 
@@ -1358,6 +1365,50 @@ app.post('/api/chat/stream', async (req, res) => {
 
       function emitContent(text) {
         appendVisibleContent(toyMarkupFilter.push(text));
+      }
+
+      function suppressThinking() {
+        pendingThinking = '';
+        thinkingSuppressed = true;
+        thinkingAllowed = false;
+        roundThinking = '';
+      }
+
+      function flushPendingThinking() {
+        if (thinkingSuppressed || !pendingThinking) return;
+        if (isLikelyEnglishThinking(pendingThinking)) {
+          suppressThinking();
+          return;
+        }
+        const clean = cleanThinkingForDisplay(pendingThinking);
+        if (!clean) {
+          suppressThinking();
+          return;
+        }
+        thinkingAllowed = true;
+        send({ type: 'thinking', content: clean });
+        pendingThinking = '';
+      }
+
+      function appendThinking(text, forceFlush = false) {
+        if (!text) return;
+        roundThinking += text;
+        if (thinkingSuppressed) return;
+
+        if (thinkingAllowed) {
+          send({ type: 'thinking', content: text });
+          return;
+        }
+
+        pendingThinking += text;
+        if (isLikelyEnglishThinking(pendingThinking)) {
+          suppressThinking();
+          return;
+        }
+
+        if (forceFlush || hasCjkText(pendingThinking) || pendingThinking.length >= 80) {
+          flushPendingThinking();
+        }
       }
 
       function flushPhase() {
@@ -1385,7 +1436,7 @@ app.post('/api/chat/stream', async (req, res) => {
           const endIdx = phaseBuffer.indexOf(THINK_CLOSE);
           if (endIdx !== -1) {
             const text = phaseBuffer.slice(0, endIdx);
-            if (text) roundThinking += text;
+            appendThinking(text, true);
             contentPhase = 'content';
             let rest = phaseBuffer.slice(endIdx + THINK_CLOSE.length);
             if (rest.startsWith('\n')) rest = rest.slice(1);
@@ -1398,7 +1449,7 @@ app.post('/api/chat/stream', async (req, res) => {
             }
             if (safe > 0) {
               const text = phaseBuffer.slice(0, safe);
-              roundThinking += text;
+              appendThinking(text);
               phaseBuffer = phaseBuffer.slice(safe);
             }
           }
@@ -1463,7 +1514,7 @@ app.post('/api/chat/stream', async (req, res) => {
 
       if (phaseBuffer) {
         if (contentPhase === 'thinking') {
-          roundThinking += phaseBuffer;
+          appendThinking(phaseBuffer, true);
         } else {
           emitContent(phaseBuffer);
         }
@@ -1471,8 +1522,8 @@ app.post('/api/chat/stream', async (req, res) => {
       }
 
       appendVisibleContent(toyMarkupFilter.flush());
+      flushPendingThinking();
       roundThinking = cleanThinkingForDisplay(roundThinking);
-      if (roundThinking) send({ type: 'thinking', content: roundThinking });
 
       const hasToolCalls = Object.keys(toolCallChunks).length > 0;
 

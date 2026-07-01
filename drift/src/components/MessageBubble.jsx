@@ -2,6 +2,8 @@ import { useEffect, useRef } from 'react';
 
 const THINKING_MARKER_RE = /^<!--DRIFT_THINKING\n([\s\S]*?)\n-->\n?/;
 const THINKING_LEGACY_RE = /^\[THINKING\]([\s\S]*?)\[\/THINKING\]\n?/;
+const CJK_CHAR_RE = /[\u3400-\u9fff\u3040-\u30ff]/g;
+const LATIN_CHAR_RE = /[A-Za-z]/g;
 
 function extractThinking(text) {
   if (!text) return { thinking: '', content: text };
@@ -11,6 +13,19 @@ function extractThinking(text) {
     thinking: match[1].trim(),
     content: text.replace(match[0], '').trim(),
   };
+}
+
+function isLikelyEnglishThinking(text = '') {
+  const value = String(text || '');
+  const latin = (value.match(LATIN_CHAR_RE) || []).length;
+  const cjk = (value.match(CJK_CHAR_RE) || []).length;
+  return (latin >= 12 && cjk === 0) || (latin >= 40 && latin > cjk * 3);
+}
+
+function cleanThinkingForDisplay(thinking = '') {
+  const clean = String(thinking || '').trim();
+  if (!clean || isLikelyEnglishThinking(clean)) return '';
+  return clean;
 }
 
 function extractImage(text) {
@@ -45,7 +60,7 @@ export default function MessageBubble({ message }) {
   const ref = useRef(null);
   const isUser = message.role === 'user';
   const extracted = extractThinking(message.content);
-  const thinking = message.thinking || extracted.thinking;
+  const thinking = cleanThinkingForDisplay(message.thinking || extracted.thinking);
   const { imageUrl, rest } = extractImage(extracted.content);
 
   useEffect(() => {
